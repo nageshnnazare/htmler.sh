@@ -359,6 +359,46 @@ def wrap_ipynb_file_as_markdown(filepath):
         return f"# {os.path.basename(filepath)}\n\nError parsing notebook: {e}\n"
 
 
+def fix_cuddled_lists(text):
+    """Ensure cuddled lists (lists immediately following a paragraph without a blank line)
+    are separated by a blank line so that python-markdown renders them as lists."""
+    lines = text.splitlines()
+    new_lines = []
+    in_code_block = False
+    
+    # Regex to match the start of a list item (ordered or unordered)
+    # e.g., 1. Item, - Item, * Item, + Item
+    list_item_re = re.compile(r'^\s*(\d+\.|[\*\-+])\s+')
+    
+    for i, line in enumerate(lines):
+        # Track if we are inside a fenced code block to avoid modifying code
+        if line.strip().startswith('```'):
+            in_code_block = not in_code_block
+            new_lines.append(line)
+            continue
+            
+        if in_code_block:
+            new_lines.append(line)
+            continue
+            
+        if list_item_re.match(line):
+            if i > 0:
+                prev_line = lines[i-1]
+                prev_stripped = prev_line.strip()
+                # If the previous line has text, is not a list item itself,
+                # and is not a header, blockquote, or horizontal rule, insert a blank line.
+                if (prev_stripped and 
+                    not list_item_re.match(prev_line) and 
+                    not prev_stripped.startswith('#') and 
+                    not prev_stripped.startswith('>') and 
+                    not (prev_stripped.startswith('---') or prev_stripped.startswith('***') or prev_stripped.startswith('___'))):
+                    new_lines.append('')
+                    
+        new_lines.append(line)
+        
+    return '\n'.join(new_lines)
+
+
 tabs = []
 for order, md_path in enumerate(md_files, start=1):
     rel_path = os.path.relpath(md_path, src_dir).replace(os.sep, '/')
@@ -376,6 +416,7 @@ for order, md_path in enumerate(md_files, start=1):
         with open(md_path, 'r', encoding='utf-8', errors='replace') as f:
             md_text = f.read()
 
+    md_text = fix_cuddled_lists(md_text)
     md_converter.reset()
     body_html = md_converter.convert(md_text)
     body_html = render_task_lists(body_html)
