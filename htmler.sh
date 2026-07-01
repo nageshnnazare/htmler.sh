@@ -320,10 +320,10 @@ def estimate_reading(body_html):
 #
 #   ```diagram
 #   title: 9.1 Architecture
-#   box[blue] Zroute Command
-#     text: route_detail / route_auto / route_opt
+#   box[blue] Command
+#     text: detail / auto / opt
 #     box[green] InternalEnable (RAII scope guard)
-#       text: Activated at **doDr()**, **drcChk()** scope
+#       text: Activated at **do()**, **chk()** scope
 #     box[red dashed] InternalForceDisable
 #       text: Overrides InternalEnable to **DISABLE** recovery
 #   ```
