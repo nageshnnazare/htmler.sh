@@ -353,10 +353,9 @@ DIAGRAM_FENCE_RE = re.compile(
 # The trailing ASCII fence is OPTIONAL: a bare <!--diagram ... --> comment just
 # renders the boxes at that spot.
 DIAGRAM_COMMENT_RE = re.compile(
-    r'(?ms)^[ \t]*<!--[ \t]*diagram[ \t]*\n'           # comment opener
-    r'(.*?)'                                            # DSL body (group 1)
-    r'^[ \t]*-->[ \t]*$'                                # comment closer
-    r'(?:(?:[ \t]*\n)*[ \t]*```[^\n]*\n.*?\n[ \t]*```[ \t]*$)?')  # optional ASCII fence to drop
+    r'(?ms)^[ \t]*<!--[ \t]*diagram[ \t]*\n'        # comment opener
+    r'(.*?)'                                           # DSL body (group 1)
+    r'^[ \t]*-->[ \t]*\n?')                          # comment closer (do NOT consume a following ASCII fence)
 
 _DBOX_RE = re.compile(r'^box\s*\[([^\]]*)\]\s*(.*)$', re.IGNORECASE)
 _DIAGRAM_COLORS = {'blue', 'green', 'orange', 'red', 'purple', 'teal',
@@ -837,6 +836,7 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }  /* WebKit/Blink
 [data-theme="light"] { color-scheme: light; }
 
 body {
+    /* - Nagesh N Nazare - */
     font-family: var(--font-sans);
     background: var(--bg-body);
     color: var(--text-primary);
@@ -2209,6 +2209,7 @@ body.nav-condensed .nav-doc-title {
 </style>
 </head>
 <body data-theme="dark" class="sidebar-collapsed toc-collapsed">
+/* - Nagesh N Nazare - */
 
 <a class="skip-link" href="#tabPanels">Skip to content</a>
 <div class="read-progress" id="readProgress"></div>
@@ -2619,6 +2620,7 @@ function wrapTables() {
 wrapTables();
 
 /* ───── Theme toggle ───── */
+/* - Nagesh N Nazare - */
 
 const HLJS_DARK = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css';
 const HLJS_LIGHT = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs.min.css';
@@ -2686,6 +2688,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ───── Tab activation ───── */
+/* - Nagesh N Nazare - */
 
 function activateTab(idx, resetScroll) {
     if (resetScroll === undefined) resetScroll = true;
@@ -2993,6 +2996,7 @@ function clearHighlights() {
 }
 
 /* ───── Sidebar TOC + scroll spy ───── */
+/* - Nagesh N Nazare - */
 
 const sidebarNav = document.getElementById('sidebarNav');
 const navList = document.getElementById('navList');
