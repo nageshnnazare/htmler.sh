@@ -331,7 +331,8 @@ def estimate_reading(body_html):
 # Nesting is driven purely by leading-space indentation. Output is plain
 # HTML/CSS — no runtime JavaScript and no external libraries.
 DIAGRAM_FENCE_RE = re.compile(
-    r'(?ms)^[ \t]*```[ \t]*diagram[ \t]*\n(.*?)\n[ \t]*```[ \t]*$')
+    r'(?ms)^[ \t]*```[ \t]*diagram[ \t]*\n(.*?)\n[ \t]*```[ \t]*'
+    r'(?:\s*\n[ \t]*```[^\n]*\n(.*?)\n[ \t]*```[ \t]*)?')
 
 # Alternative authoring form for "ASCII in the .md, boxes in the HTML":
 # put the DSL inside an HTML comment (invisible to Markdown viewers) and keep
@@ -355,7 +356,8 @@ DIAGRAM_FENCE_RE = re.compile(
 DIAGRAM_COMMENT_RE = re.compile(
     r'(?ms)^[ \t]*<!--[ \t]*diagram[ \t]*\n'        # comment opener
     r'(.*?)'                                           # DSL body (group 1)
-    r'^[ \t]*-->[ \t]*\n?')                          # comment closer (do NOT consume a following ASCII fence)
+    r'^[ \t]*-->[ \t]*'                                # comment closer
+    r'(?:\s*\n[ \t]*```[^\n]*\n(.*?)\n[ \t]*```[ \t]*)?')
 
 _DBOX_RE = re.compile(r'^box\s*\[([^\]]*)\]\s*(.*)$', re.IGNORECASE)
 _DIAGRAM_COLORS = {'blue', 'green', 'orange', 'red', 'purple', 'teal',
@@ -368,6 +370,15 @@ def _diagram_inline(text):
     out = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', out)
     out = re.sub(r'`([^`]+?)`', r'<code>\1</code>', out)
     return out
+
+
+def render_ascii_diagram(src):
+    """Render an ASCII diagram as a collapsed details/summary block."""
+    body = html.escape(src.rstrip('\n'), quote=False)
+    return ('<details class="ascii-diagram">'
+            '<summary>Details</summary>'
+            '<pre><code>%s</code></pre>'
+            '</details>') % body
 
 
 def render_diagram_dsl(src):
@@ -570,11 +581,15 @@ for order, md_path in enumerate(md_files, start=1):
     diagram_html = []
 
     def _stash_diagram(m):
-        diagram_html.append(render_diagram_dsl(m.group(1)))
+        rendered = render_diagram_dsl(m.group(1))
+        ascii_src = m.group(2) if m.lastindex and m.lastindex >= 2 else None
+        if ascii_src is not None:
+            rendered += render_ascii_diagram(ascii_src)
+        diagram_html.append(rendered)
         return '\n\nDIAGRAMBLOCK%dENDDIAGRAM\n\n' % (len(diagram_html) - 1)
 
-    # Comment form first (it may swallow a trailing ASCII fence), then the
-    # plain ```diagram fenced form.
+    # Comment form first (it may capture an optional trailing ASCII fence),
+    # then the plain ```diagram fenced form.
     md_text = DIAGRAM_COMMENT_RE.sub(_stash_diagram, md_text)
     md_text = DIAGRAM_FENCE_RE.sub(_stash_diagram, md_text)
 
