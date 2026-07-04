@@ -2224,7 +2224,6 @@ body.nav-condensed .nav-doc-title {
 </style>
 </head>
 <body data-theme="dark" class="sidebar-collapsed toc-collapsed">
-/* - Nagesh N Nazare - */
 
 <a class="skip-link" href="#tabPanels">Skip to content</a>
 <div class="read-progress" id="readProgress"></div>
@@ -2461,6 +2460,7 @@ while (treeHtml.firstChild) {
    Docs may live in sub-directories and link to each other with relative
    paths ("../03_patterns/README.md"), bare files ("CHEATSHEET.md") or even a
    folder ("01_pthreads/"), which we resolve to that folder's README. */
+/* - Nagesh N Nazare - */
 const BY_PATH = {};        // "01_pthreads/readme.md"  -> idx
 const BY_DIR_README = {};  // "01_pthreads" / ""        -> idx (README of dir)
 const BY_BASENAME = {};    // "cheatsheet.md"           -> idx (only if unique)
@@ -2569,6 +2569,7 @@ function updateDocNav(idx) {
 }
 
 /* ───── Syntax highlighting ───── */
+/* - Nagesh N Nazare - */
 
 function addCopyButton(pre, block) {
     const btn = document.createElement('button');
@@ -2623,6 +2624,7 @@ function highlightAllCode() {
 highlightAllCode();
 
 /* ───── Wrap tables so they scroll horizontally on narrow screens ───── */
+/* - Nagesh N Nazare - */
 function wrapTables() {
     document.querySelectorAll('.tab-content table').forEach(table => {
         if (table.parentElement && table.parentElement.classList.contains('table-scroll')) return;
@@ -2752,6 +2754,7 @@ function activateTab(idx, resetScroll) {
    Remembers the last document, sidebar/TOC open state and scroll position so
    reopening the file resumes where you left off. Writes happen only on tab
    switch, panel toggle and page hide -- never during scrolling. */
+/* - Nagesh N Nazare - */
 const LS = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
@@ -2767,6 +2770,7 @@ document.addEventListener('visibilitychange', function () {
 });
 
 /* ───── Search index: pre-extract plain text per block ───── */
+/* - Nagesh N Nazare - */
 
 const searchIndex = [];
 
@@ -2803,6 +2807,7 @@ TAB_DATA.forEach((tab, tabIdx) => {
 });
 
 /* ───── Search overlay logic ───── */
+/* - Nagesh N Nazare - */
 
 const overlay = document.getElementById('searchOverlay');
 const searchInput = document.getElementById('searchInput');
@@ -3123,6 +3128,7 @@ function updateScrollSpy() {
 }
 
 /* ───── iOS-style condensing navbar (hide on scroll down, show on scroll up) ───── */
+/* - Nagesh N Nazare - */
 function updateNavCondense() {
     const y = window.scrollY;
     const NAV_TOP = 8;       // always expanded near the very top
@@ -3200,6 +3206,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ───── Anchor + cross-document link interception ───── */
+/* - Nagesh N Nazare - */
 
 /* Find an element by id, preferring the given panel (heading ids can collide
    across documents because each file is converted independently). */
@@ -3228,6 +3235,7 @@ function gotoAnchor(idx, anchor) {
    Whenever a link takes the reader to another section/document, remember where
    they were (which tab + scroll position) so the navbar back button can return
    them to exactly that spot. */
+/* - Nagesh N Nazare - */
 const navBackBtn = document.getElementById('navBack');
 let navHistory = [];
 
