@@ -242,6 +242,94 @@ def ensure_import(module_name, pip_name=None):
 
 markdown = ensure_import('markdown')
 
+
+def _protect_latex_snippet(text, replacements):
+    """Replace LaTeX formulas with placeholders so markdown leaves them intact."""
+    result = []
+    i = 0
+    in_code = False
+    code_delim = None
+    while i < len(text):
+        if text[i] == '`':
+            run = 1
+            while i + run < len(text) and text[i + run] == '`':
+                run += 1
+            if not in_code:
+                code_delim = run
+                in_code = True
+            elif run == code_delim:
+                code_delim = None
+                in_code = False
+            result.append(text[i:i + run])
+            i += run
+            continue
+
+        if not in_code and text[i] == '$' and (i == 0 or text[i - 1] != '\\'):
+            if i + 1 < len(text) and text[i + 1] == '$':
+                end = text.find('$$', i + 2)
+                if end != -1:
+                    token = '%%HTMLER_LATEX_BLOCK_%d%%' % len(replacements)
+                    replacements.append((token, text[i:end + 2]))
+                    result.append(token)
+                    i = end + 2
+                    continue
+            end = text.find('$', i + 1)
+            if end != -1:
+                token = '%%HTMLER_LATEX_INLINE_%d%%' % len(replacements)
+                replacements.append((token, text[i:end + 1]))
+                result.append(token)
+                i = end + 1
+                continue
+
+        result.append(text[i])
+        i += 1
+
+    return ''.join(result)
+
+
+def protect_latex_delimiters(text):
+    """Mask LaTeX formulas before markdown conversion and restore them after."""
+    lines = text.splitlines(keepends=True)
+    out = []
+    replacements = []
+    in_fence = False
+    fence_marker = None
+    buffer = []
+
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith('```') or stripped.startswith('~~~'):
+            marker = stripped[:3]
+            if not in_fence:
+                if buffer:
+                    out.append(_protect_latex_snippet(''.join(buffer), replacements))
+                    buffer = []
+                in_fence = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                in_fence = False
+                fence_marker = None
+            out.append(line)
+            continue
+
+        if in_fence:
+            out.append(line)
+        else:
+            buffer.append(line)
+
+    if buffer:
+        out.append(_protect_latex_snippet(''.join(buffer), replacements))
+
+    return ''.join(out), replacements
+
+
+def restore_latex_delimiters(body_html, replacements):
+    """Restore masked LaTeX formulas after markdown conversion."""
+    for token, original in replacements:
+        body_html = body_html.replace(token, original)
+    return body_html
+
+
 def github_slugify(value, separator):
     """Mimic GitHub's heading-anchor slugify so hand-written in-doc anchor
     links like (#52-object-layout--this) line up with generated heading ids."""
@@ -593,9 +681,11 @@ for order, md_path in enumerate(md_files, start=1):
     md_text = DIAGRAM_COMMENT_RE.sub(_stash_diagram, md_text)
     md_text = DIAGRAM_FENCE_RE.sub(_stash_diagram, md_text)
 
+    md_text, math_replacements = protect_latex_delimiters(md_text)
     md_text = fix_cuddled_lists(md_text)
     md_converter.reset()
     body_html = md_converter.convert(md_text)
+    body_html = restore_latex_delimiters(body_html, math_replacements)
     body_html = render_task_lists(body_html)
     body_html = render_callouts(body_html)
     for i, dhtml in enumerate(diagram_html):
@@ -647,6 +737,20 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <!-- highlight.js for syntax highlighting (VS Code dark+ theme) -->
 <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    processEscapes: true,
+    processEnvironments: true
+  },
+  options: {
+    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+  }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <style>
 /* === CSS Custom Properties for theming === */
 /* - Nagesh N Nazare - */
@@ -2333,6 +2437,13 @@ function prettifyKeepNum(component) {
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => HTML_ESCAPES[c]); }
 function cleanName(name) { return (name || '').replace(/^\s*\d+\.\s*/, ''); }
+function renderMathInNode(node) {
+    if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+        window.MathJax.typesetPromise([node]).catch(() => {});
+    } else {
+        window.setTimeout(() => renderMathInNode(node), 50);
+    }
+}
 
 const CLOCK_ICON = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8.75-4.25v3.94l2.4 2.4a.75.75 0 0 1-1.06 1.06l-2.62-2.62a.75.75 0 0 1-.22-.53V3.75a.75.75 0 0 1 1.5 0Z"></path></svg>';
 
@@ -2347,6 +2458,9 @@ TAB_DATA.forEach((tab, idx) => {
     panel.id = 'panel-' + idx;
     panel.dataset.dir = tab.dir || '';
     panel.innerHTML = tab.body;
+    if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([panel]).catch(() => {});
+    }
 
     // Breadcrumb + reading-time meta line (prepended, built once).
     const meta = document.createElement('div');

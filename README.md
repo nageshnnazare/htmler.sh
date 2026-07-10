@@ -19,7 +19,7 @@
 - **Responsive by design.** Works edge-to-edge on phones and iPads — drawers collapse into overlays, tables scroll, and the layout respects iOS safe areas.
 - **Light & dark themes** with an Apple-style "liquid glass" navbar; the choice is remembered across visits.
 - **Real syntax highlighting** (highlight.js) with per-block copy buttons and language labels.
-- **GitHub-flavored extras:** task-list checkboxes, tables, footnote-style cross-document links, and heading anchors that match GitHub slugs.
+- **GitHub-flavored extras:** task-list checkboxes, tables, footnote-style cross-document links, heading anchors that match GitHub slugs, and LaTeX math rendering.
 - **More than Markdown.** Source files and Jupyter notebooks are rendered as highlighted code/prose automatically.
 - **Portable & self-healing.** It finds a suitable Python 3 interpreter on its own and installs the one Python dependency (`markdown`) on the fly if it is missing.
 
@@ -132,7 +132,7 @@ If `python3` on your machine points at an ancient build, `htmler` automatically 
 ## How it works
 
 1. **Bash** parses options, resolves the file list (explicit `-f`/positional/glob, or recursive discovery), and locates a capable Python interpreter.
-2. **Python** converts each file with the `markdown` library (fenced code, tables, task lists, smart typography, and GitHub-style heading anchors), rendering notebooks and source files as needed.
+2. **Python** converts each file with the `markdown` library (fenced code, tables, task lists, smart typography, GitHub-style heading anchors, and LaTeX math via MathJax), rendering notebooks and source files as needed.
 3. All documents are embedded into one HTML template along with the CSS/JS that powers the tabs, search index, table of contents, theming, and responsive layout.
 
 ## License
