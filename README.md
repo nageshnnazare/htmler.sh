@@ -65,12 +65,16 @@ An internet connection is only needed the first time, to fetch fonts and the hig
 ## Usage
 
 ```text
-htmler.sh [-o output.html] [-f file ...] [file ...]
+htmler.sh [-o output.html] [-x dir ...] [-f file ...] [file ...]
 
   -o output.html   Name of the generated HTML (default: combine_docs.html)
   -f file          Include a specific file (repeatable). May also be passed as
                    positional arguments or as a glob. When any files are given,
                    ONLY those files are included, in the order provided.
+  -x dir           Exclude a directory from recursive discovery (repeatable).
+                   Matches a bare directory name (e.g. figures) anywhere in the
+                   tree, or a path relative to the current directory
+                   (e.g. docs/figures). Ignored when explicit files are given.
   -h               Show usage.
 
   (no files)       Default: recursively discover every supported file under the
@@ -85,6 +89,10 @@ htmler.sh [-o output.html] [-f file ...] [file ...]
 
 # Custom output name
 ./htmler.sh -o guide.html
+
+# Discover everything, but skip some directories
+./htmler.sh -x figures -x build
+./htmler.sh -x docs/figures        # exclude a specific path
 
 # A hand-picked, ordered set of files
 ./htmler.sh -o guide.html -f README.md -f docs/intro.md -f docs/api.md

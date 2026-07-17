@@ -8,12 +8,16 @@
 # Code files are automatically wrapped in markdown code blocks with syntax highlighting.
 # v6: Added support for C/C++/CUDA code files.
 #
-# Usage: ./htmler.sh [-o output.html] [-f file.md|file.c|file.cpp ...] [file ...]
+# Usage: ./htmler.sh [-o output.html] [-x dir ...] [-f file.md|file.c|file.cpp ...] [file ...]
 #   -o output.html   Name of the generated HTML (default: combine_docs.html)
 #   -f file          Include a specific file (.md, .c, .cpp, .cu, .h, .hpp).
 #                    Repeatable. May also be given as positional arguments.
 #                    When any files are specified, ONLY those files are included,
 #                    in the order given.
+#   -x dir           Exclude a directory from recursive discovery. Repeatable.
+#                    Matches a directory name (e.g. figures) or a path relative
+#                    to the current directory (e.g. docs/figures). Ignored when
+#                    explicit files are given.
 #   (no files)       Default: recursively discover every .md and code file under cwd.
 # Output: combine_docs.html (default) or specified file in the current directory
 # Author: Nagesh N Nazare
@@ -22,15 +26,17 @@ set -euo pipefail
 
 OUTPUT_NAME="combine_docs.html"
 MD_FILES=()
+EXCLUDE_DIRS=()
 
 usage() {
-    echo "Usage: $0 [-o output.html] [-f file.md|file.c|file.cpp ...] [file ...]" >&2
+    echo "Usage: $0 [-o output.html] [-x dir ...] [-f file.md|file.c|file.cpp ...] [file ...]" >&2
 }
 
-while getopts "o:f:h" opt; do
+while getopts "o:f:x:h" opt; do
     case "$opt" in
         o) OUTPUT_NAME="$OPTARG" ;;
         f) MD_FILES+=("$OPTARG") ;;
+        x) EXCLUDE_DIRS+=("$OPTARG") ;;
         h) usage; exit 0 ;;
         *) usage; exit 1 ;;
     esac
@@ -104,20 +110,59 @@ PYTHON_BIN="$(find_python)" || {
     exit 1
 }
 
+# Pass excluded directories via env var (newline-separated) so they don't collide
+# with the positional file arguments consumed by the Python script.
+HTMLER_EXCLUDE_DIRS=""
+if [ "${#EXCLUDE_DIRS[@]}" -gt 0 ]; then
+    HTMLER_EXCLUDE_DIRS="$(printf '%s\n' "${EXCLUDE_DIRS[@]}")"
+fi
+export HTMLER_EXCLUDE_DIRS
+
 "$PYTHON_BIN" - "$SCRIPT_DIR" "$FINAL" "$TITLE" ${MD_FILES[@]+"${MD_FILES[@]}"} << 'PYTHON_SCRIPT'
-import sys, os, glob, re, html, json
+import sys, os, glob, re, html, json, base64, mimetypes, urllib.parse
 
 src_dir = sys.argv[1]
 out_file = sys.argv[2]
 doc_title = sys.argv[3]
 explicit_files = sys.argv[4:]  # optional, user-specified .md files (-f / positional)
 
+def _load_user_excludes():
+    """Read user-specified directory excludes from the environment.
+
+    Each entry may be a bare directory name (matched anywhere in the tree) or a
+    path relative to the root (matched against the directory's relative path).
+    """
+    raw = os.environ.get('HTMLER_EXCLUDE_DIRS', '')
+    names, rel_paths = set(), set()
+    for line in raw.splitlines():
+        entry = line.strip().rstrip('/')
+        if not entry:
+            continue
+        norm = os.path.normpath(entry).replace(os.sep, '/')
+        if '/' in norm:
+            rel_paths.add(os.path.normcase(norm))
+        else:
+            names.add(norm)
+    return names, rel_paths
+
+
 def collect_md_files(root):
     """Find every .md file under root (recursively), skipping noise dirs."""
     skip = {'.git', 'node_modules', '.venv', 'venv', '__pycache__', '.idea', '.vscode'}
+    user_names, user_rel_paths = _load_user_excludes()
     found = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith('.')]
+        kept = []
+        for d in dirnames:
+            if d in skip or d.startswith('.'):
+                continue
+            if d in user_names:
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, d), root).replace(os.sep, '/')
+            if os.path.normcase(rel) in user_rel_paths:
+                continue
+            kept.append(d)
+        dirnames[:] = kept
         for fn in filenames:
             fn_lower = fn.lower()
             if fn_lower.endswith('.md') or fn_lower.endswith(('.c', '.cpp', '.cu', '.h', '.hpp', '.py', '.ipynb')):
@@ -241,6 +286,19 @@ def ensure_import(module_name, pip_name=None):
 
 
 markdown = ensure_import('markdown')
+
+# Pygments powers build-time syntax highlighting so the generated page needs no
+# runtime highlighter (no CDN script, no work on load). Highlighting happens
+# once here; the browser just paints pre-colored spans.
+pygments = ensure_import('pygments', 'Pygments')
+from pygments import highlight as _pyg_highlight
+from pygments.formatters import HtmlFormatter as _PygHtmlFormatter
+from pygments.lexers import get_lexer_by_name as _pyg_get_lexer
+from pygments.util import ClassNotFound as _PygClassNotFound
+
+# nowrap=True emits only the token <span>s (no <div class="highlight"><pre>
+# wrapper) so we can drop them straight into the existing <pre><code> markup.
+_PYG_FORMATTER = _PygHtmlFormatter(nowrap=True)
 
 
 def _protect_latex_snippet(text, replacements):
@@ -401,6 +459,157 @@ def estimate_reading(body_html):
     words = len(text.split())
     minutes = max(1, int(round(words / 200.0)))
     return words, minutes
+
+
+# ── Build-time syntax highlighting ──────────────────────────────────────────
+# Fenced code blocks come out of Markdown as <pre><code class="language-xxx">
+# with HTML-escaped text. We colorize them once, here, with Pygments so there
+# is zero runtime cost and the page works offline (no highlight.js CDN).
+_CODE_BLOCK_RE = re.compile(r'<pre><code([^>]*)>(.*?)</code></pre>', re.DOTALL)
+_LANG_CLASS_RE = re.compile(r'language-([\w+.#-]+)')
+_PLAIN_LANGS = {'text', 'plain', 'plaintext', 'none', 'output'}
+
+# Monotonic counter giving every highlighted, multi-line code block a unique id
+# so its per-line anchors (#Lb-n) never clash across the whole page.
+_pyg_block_counter = [0]
+
+
+def _highlight_code(code, lang):
+    """Return Pygments-highlighted inner HTML (spans only), or None to skip."""
+    try:
+        lexer = _pyg_get_lexer(lang, stripnl=False)
+    except _PygClassNotFound:
+        return None
+    out = _pyg_highlight(code, lexer, _PYG_FORMATTER)
+    # highlight() appends a trailing newline; drop it so the block keeps the
+    # same visible height it had before colorizing.
+    if out.endswith('\n'):
+        out = out[:-1]
+    return out
+
+
+def _wrap_code_lines(highlighted, block_id):
+    """Wrap each code line so the CSS gutter can number it and each line can be
+    linked to / :target-highlighted. The line break comes from the block-level
+    .cl (no literal '\\n'), which keeps copy-to-clipboard output clean while the
+    gutter numbers (CSS ::before counters) stay out of the copied text."""
+    lines = highlighted.split('\n')
+    out = []
+    for n, line in enumerate(lines, start=1):
+        lid = 'L%d-%d' % (block_id, n)
+        out.append(
+            '<span class="cl" id="{lid}">'
+            '<a class="lnr" href="#{lid}" tabindex="-1" aria-hidden="true"></a>'
+            '{code}</span>'.format(lid=lid, code=line))
+    return ''.join(out)
+
+
+def apply_syntax_highlighting(body_html):
+    """Colorize fenced code blocks at build time (keeps the <pre><code> shape
+    the copy button + language label logic already depend on) and add anchored
+    line numbers for multi-line blocks."""
+    def repl(m):
+        attrs, inner = m.group(1), m.group(2)
+        lm = _LANG_CLASS_RE.search(attrs)
+        lang = lm.group(1) if lm else None
+        classes = 'pygcode'
+        data_lang = ''
+        new_inner = inner
+        numbered = False
+        if lang:
+            classes += ' language-' + lang
+            data_lang = ' data-lang="%s"' % html.escape(lang, quote=True)
+            if lang.lower() not in _PLAIN_LANGS:
+                highlighted = _highlight_code(html.unescape(inner), lang)
+                if highlighted is not None:
+                    if '\n' in highlighted:
+                        _pyg_block_counter[0] += 1
+                        new_inner = _wrap_code_lines(highlighted, _pyg_block_counter[0])
+                        numbered = True
+                    else:
+                        new_inner = highlighted
+        if numbered:
+            classes += ' has-linenos'
+        return '<pre><code class="%s"%s>%s</code></pre>' % (classes, data_lang, new_inner)
+    return _CODE_BLOCK_RE.sub(repl, body_html)
+
+
+# ── Collapsible sections (build-time <details>, zero runtime JS) ─────────────
+# Each <h2> and the body that follows it (up to the next <h2>) is wrapped in a
+# native <details> so long sections can be folded away. Sections stay open by
+# default so nothing is hidden on load and in-page navigation keeps working;
+# only sections with a substantial body are wrapped (short ones are left plain
+# to avoid a fold control on a one-line section).
+_H2_SPLIT_RE = re.compile(r'(<h2\b[^>]*>.*?</h2>)', re.DOTALL)
+_FOLD_MIN_CHARS = 480
+
+
+def add_collapsible_sections(body_html):
+    parts = _H2_SPLIT_RE.split(body_html)
+    if len(parts) < 3:
+        return body_html
+    out = [parts[0]]
+    i = 1
+    while i < len(parts):
+        heading = parts[i]
+        content = parts[i + 1] if i + 1 < len(parts) else ''
+        visible = re.sub(r'<[^>]+>', '', content).strip()
+        if len(visible) >= _FOLD_MIN_CHARS:
+            out.append(
+                '<details class="sec-fold" open>'
+                '<summary class="sec-summary">%s</summary>'
+                '<div class="sec-body">%s</div>'
+                '</details>' % (heading, content))
+        else:
+            out.append(heading + content)
+        i += 2
+    return ''.join(out)
+
+
+def _github_light_defs(selector):
+    """Hand-rolled GitHub-Light token palette.
+
+    Pygments ships no 'github-light' style, and its stock light styles
+    ('default', 'friendly', ...) use garish bold-green keywords / pure-blue
+    functions that clash with the clean UI and look broken next to the modern
+    'github-dark' we use for dark mode. This mirrors that dark palette's
+    structure so both themes feel like one product."""
+    palette = [
+        ('#6E7781', ['c', 'ch', 'cm', 'cp', 'cpf', 'c1', 'cs', 'cd']),          # comments
+        ('#CF222E', ['k', 'kc', 'kd', 'kn', 'kp', 'kr', 'kt', 'ow', 'err']),    # keywords
+        ('#0A3069', ['s', 'sa', 'sb', 'sc', 'dl', 'sd', 's2', 'se', 'sh',
+                     'si', 'sx', 'sr', 's1', 'ss']),                            # strings
+        ('#0550AE', ['m', 'mb', 'mf', 'mh', 'mi', 'mo', 'il',
+                     'nb', 'bp', 'na', 'o']),                                   # numbers/builtins/operators
+        ('#8250DF', ['nf', 'fm', 'nd']),                                        # functions / decorators
+        ('#953800', ['nv', 'vc', 'vg', 'vi', 'nl', 'nc', 'nn', 'no']),          # variables / classes / constants
+        ('#116329', ['nt']),                                                    # html/xml tags
+    ]
+    lines = ['%s { color: #24292F; }' % selector]
+    for color, classes in palette:
+        sel = ', '.join('%s .%s' % (selector, c) for c in classes)
+        lines.append('%s { color: %s; }' % (sel, color))
+    # Italic comments to match the github-dark treatment.
+    lines.append(', '.join('%s .%s' % (selector, c)
+                           for c in ['c', 'ch', 'cm', 'c1', 'cs']) +
+                 ' { font-style: italic; }')
+    return '\n'.join(lines)
+
+
+def build_pygments_css():
+    """CSS token colors for both themes, scoped so the active theme wins.
+    Falls back gracefully if a preferred style name is missing."""
+    def defs(style_names, selector):
+        for name in style_names:
+            try:
+                return _PygHtmlFormatter(style=name).get_style_defs(selector)
+            except Exception:
+                continue
+        return ''
+    dark = defs(['github-dark', 'monokai', 'native'],
+                'body[data-theme="dark"] .pygcode')
+    light = _github_light_defs('body[data-theme="light"] .pygcode')
+    return dark + '\n' + light
 
 
 # ── ```diagram blocks → nested, colored boxes (rendered at build time) ──────
@@ -646,6 +855,103 @@ def fix_cuddled_lists(text):
     return '\n'.join(new_lines)
 
 
+# ── Inline local images (and image links) into the self-contained HTML ──────
+# The generated file is a single standalone .html, so relative image paths on
+# disk would be dead links. At build time we:
+#   1. Turn Markdown links that point at an image file, e.g. [caption](pic.png),
+#      into real <img> elements instead of anchors ("the actual image, not a
+#      link").
+#   2. Embed every local image (both the above and normal ![alt](pic.png)) as a
+#      base64 data: URI so the picture travels inside the HTML.
+# Remote (http/https) and already-inlined (data:) images are left untouched.
+IMAGE_EXTS = {
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp',
+    '.bmp', '.ico', '.avif', '.apng', '.jfif',
+}
+
+IMG_TAG_RE = re.compile(r'<img\b[^>]*>', re.I)
+IMG_SRC_RE = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)\2', re.I)
+# Anchor with its href + inner content (non-greedy, spans newlines).
+ANCHOR_RE = re.compile(
+    r'<a\b([^>]*?)\shref\s*=\s*(["\'])(.*?)\2([^>]*)>(.*?)</a>', re.I | re.S)
+
+
+def _is_local_image_ref(raw):
+    """True if `raw` looks like a path to a local image file (not a URL)."""
+    if not raw:
+        return False
+    ref = html.unescape(raw).strip()
+    if not ref or ref.startswith('#') or ref.startswith('data:'):
+        return False
+    if re.match(r'^[a-z][a-z0-9+.-]*://', ref, re.I) or re.match(r'^(mailto|tel):', ref, re.I):
+        return False
+    clean = ref.split('#', 1)[0].split('?', 1)[0]
+    return os.path.splitext(clean)[1].lower() in IMAGE_EXTS
+
+
+def _image_data_uri(base_dir, raw_src):
+    """Resolve a (possibly relative) image reference against base_dir and return
+    a base64 data: URI, or None when the file can't be read."""
+    ref = html.unescape(raw_src).strip().split('#', 1)[0].split('?', 1)[0]
+    try:
+        ref = urllib.parse.unquote(ref)
+    except Exception:
+        pass
+    abs_path = ref if os.path.isabs(ref) else os.path.normpath(os.path.join(base_dir, ref))
+    if not os.path.isfile(abs_path):
+        print("[!] Image not found, leaving reference as-is:", raw_src, file=sys.stderr)
+        return None
+    ext = os.path.splitext(abs_path)[1].lower()
+    mime = mimetypes.guess_type(abs_path)[0]
+    if not mime:
+        mime = 'image/svg+xml' if ext == '.svg' else 'application/octet-stream'
+    try:
+        with open(abs_path, 'rb') as fh:
+            data = fh.read()
+    except OSError as e:
+        print("[!] Could not read image %s: %s" % (abs_path, e), file=sys.stderr)
+        return None
+    b64 = base64.b64encode(data).decode('ascii')
+    return 'data:%s;base64,%s' % (mime, b64)
+
+
+def inline_images(body_html, base_dir):
+    """Convert image links to <img> and embed all local images as data URIs."""
+
+    def _anchor_repl(m):
+        pre, quote, href, post, inner = m.groups()
+        if not _is_local_image_ref(href):
+            return m.group(0)
+        data_uri = _image_data_uri(base_dir, href)
+        if not data_uri:
+            return m.group(0)
+        # Alt text: prefer the link's visible text, else a nested img's alt.
+        alt = re.sub(r'<[^>]+>', '', inner).strip()
+        if not alt:
+            am = re.search(r'\balt\s*=\s*(["\'])(.*?)\1', inner, re.I)
+            if am:
+                alt = html.unescape(am.group(2))
+        return '<img src="%s" alt="%s" loading="lazy">' % (
+            data_uri, html.escape(alt, quote=True))
+
+    body_html = ANCHOR_RE.sub(_anchor_repl, body_html)
+
+    def _img_repl(m):
+        tag = m.group(0)
+        sm = IMG_SRC_RE.search(tag)
+        if not sm:
+            return tag
+        src = sm.group(3)
+        if src.startswith('data:') or not _is_local_image_ref(src):
+            return tag
+        data_uri = _image_data_uri(base_dir, src)
+        if not data_uri:
+            return tag
+        return tag[:sm.start(3)] + data_uri + tag[sm.end(3):]
+
+    return IMG_TAG_RE.sub(_img_repl, body_html)
+
+
 tabs = []
 for order, md_path in enumerate(md_files, start=1):
     rel_path = os.path.relpath(md_path, src_dir).replace(os.sep, '/')
@@ -662,6 +968,9 @@ for order, md_path in enumerate(md_files, start=1):
     else:
         with open(md_path, 'r', encoding='utf-8', errors='replace') as f:
             md_text = f.read()
+
+    # Keep the untouched Markdown source for the "Copy as Markdown" / raw view.
+    raw_source = md_text
 
     # Pull ```diagram blocks out before markdown sees them (their indentation
     # and custom syntax must not be touched), leaving a plain-text token we
@@ -688,10 +997,18 @@ for order, md_path in enumerate(md_files, start=1):
     body_html = restore_latex_delimiters(body_html, math_replacements)
     body_html = render_task_lists(body_html)
     body_html = render_callouts(body_html)
+    # Colorize code blocks now (before diagram tokens are swapped back in, so
+    # the ASCII-art diagram <pre> blocks are left untouched).
+    body_html = apply_syntax_highlighting(body_html)
     for i, dhtml in enumerate(diagram_html):
         token = 'DIAGRAMBLOCK%dENDDIAGRAM' % i
         body_html = body_html.replace('<p>%s</p>' % token, dhtml)
         body_html = body_html.replace(token, dhtml)
+    # Resolve image links/sources relative to the source file's own directory,
+    # then embed them as data: URIs so the standalone HTML shows real pictures.
+    body_html = inline_images(body_html, os.path.dirname(os.path.abspath(md_path)))
+    # Wrap long <h2> sections in <details> so they can be folded (native/no JS).
+    body_html = add_collapsible_sections(body_html)
     words, mins = estimate_reading(body_html)
     tabs.append({
         'name': tab_name,
@@ -699,13 +1016,24 @@ for order, md_path in enumerate(md_files, start=1):
         'pathNoExt': rel_noext,  # e.g. 01_pthreads/README
         'dir': rel_dir,          # e.g. 01_pthreads  ('' for root)
         'body': body_html,
+        'raw': raw_source,
         'words': words,
         'mins': mins,
     })
     print("[*] Converted {0} -> {1}".format(rel_path, tab_name))
 
 def js_escape(s):
-    return s.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
+    # The final `.replace('</', '<\\/')` is critical: an HTML parser ends a
+    # <script> element at the first literal "</script>" no matter where it sits
+    # in the JS source (even inside a string/template literal). Doc content can
+    # legitimately contain "</script>" (e.g. an XSS example in a code block),
+    # which would otherwise truncate the whole page script. Turning "</" into
+    # "<\/" keeps the same string value in JS while hiding the closing tag from
+    # the parser. Must run AFTER backslash-doubling so the inserted "\" survives.
+    return (s.replace('\\', '\\\\')
+             .replace('`', '\\`')
+             .replace('${', '\\${')
+             .replace('</', '<\\/'))
 
 tab_js_entries = []
 for t in tabs:
@@ -713,14 +1041,23 @@ for t in tabs:
     escaped_path = js_escape(t['path'])
     escaped_dir = js_escape(t['dir'])
     escaped_body = js_escape(t['body'])
+    escaped_raw = js_escape(t['raw'])
     tab_js_entries.append(
-        '  {{ name: `{name}`, path: `{path}`, dir: `{dir}`, words: {words}, mins: {mins}, body: `{body}` }}'.format(
+        '  {{ name: `{name}`, path: `{path}`, dir: `{dir}`, words: {words}, mins: {mins}, body: `{body}`, raw: `{raw}` }}'.format(
             name=escaped_name, path=escaped_path, dir=escaped_dir,
-            words=t['words'], mins=t['mins'], body=escaped_body))
+            words=t['words'], mins=t['mins'], body=escaped_body, raw=escaped_raw))
 
 tab_data_js = 'const TAB_DATA = [\n' + ',\n'.join(tab_js_entries) + '\n];'
 
 escaped_title = html.escape(doc_title)
+
+# Per-site localStorage namespace so bookmarks / theme / last-open state never
+# leak between different generated HTML files (all file:// pages otherwise share
+# one localStorage origin). Derived from the title + the set of document paths
+# so it stays stable across regenerations of the same doc set.
+import hashlib as _hashlib
+_ns_seed = doc_title + '|' + '|'.join(t['path'] for t in tabs)
+storage_ns = 'htmler:' + _hashlib.md5(_ns_seed.encode('utf-8')).hexdigest()[:10] + ':'
 
 HTML_TEMPLATE = r'''<!DOCTYPE html>
 <html lang="en">
@@ -734,9 +1071,7 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
-<!-- highlight.js for syntax highlighting (VS Code dark+ theme) -->
-<link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<!-- Syntax highlighting is baked in at build time (Pygments); no runtime highlighter needed. -->
 <script>
 window.MathJax = {
   tex: {
@@ -840,6 +1175,12 @@ window.MathJax = {
     --nav-active-bg: rgba(108,177,240,0.12);
     --nav-doc-active-bg: var(--accent);
     --nav-doc-active-fg: #0a0f17;
+    /* Sidebar highlight colors: same treatment, distinct hue per list so the
+       "Documents" (blue) and "On this page" (violet) selections read apart. */
+    --nav-hl-doc: #6cb1f0;
+    --nav-hl-doc-bg: rgba(108,177,240,0.14);
+    --nav-hl-toc: #4ec9b0;
+    --nav-hl-toc-bg: rgba(78,201,176,0.15);
     --scrollbar-thumb: #2a2e40;
 
     /* Diagram (```diagram) box accent palette */
@@ -923,6 +1264,10 @@ window.MathJax = {
     --nav-active-bg: rgba(31,111,196,0.10);
     --nav-doc-active-bg: var(--accent);
     --nav-doc-active-fg: #ffffff;
+    --nav-hl-doc: #1f6fc4;
+    --nav-hl-doc-bg: rgba(31,111,196,0.12);
+    --nav-hl-toc: #0d9488;
+    --nav-hl-toc-bg: rgba(13,148,136,0.12);
     --scrollbar-thumb: #d0d4e2;
 
     /* Diagram (```diagram) box accent palette (darker for light bg contrast) */
@@ -1012,9 +1357,10 @@ body {
 /* iOS-style condensed title: hidden until the page is scrolled down. */
 .nav-doc-title {
     position: absolute;
-    left: 50%;
+    right: 18px;
+    left: auto;
     top: 50%;
-    transform: translate(-50%, calc(-50% + 8px));
+    transform: translateY(calc(-50% + 8px));
     max-width: min(60vw, 520px);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1073,7 +1419,7 @@ body.nav-condensed .search-widget {
 }
 body.nav-condensed .nav-doc-title {
     opacity: 1;
-    transform: translate(-50%, -50%);
+    transform: translateY(-50%);
     pointer-events: auto;
 }
 
@@ -1107,8 +1453,8 @@ body.nav-condensed .nav-doc-title {
     gap: 8px;
     min-width: 0;
     flex-shrink: 1;
-    /* Push the picker to the right so it sits alongside the navbar buttons. */
-    margin-left: auto;
+    /* Sit at the very right end of the navbar, after the button cluster. */
+    order: 10;
 }
 
 .doc-selector-label {
@@ -1320,6 +1666,8 @@ body.nav-condensed .nav-doc-title {
     align-items: center;
     gap: 14px;          /* larger gap separates the two button groups */
     flex-shrink: 0;
+    /* Push the button cluster (and the doc selector after it) to the right. */
+    margin-left: auto;
 }
 
 .search-kbd {
@@ -1351,12 +1699,19 @@ body.nav-condensed .nav-doc-title {
     background: var(--bg-search-overlay-inner);
     border: 1px solid var(--border-header);
     border-radius: 8px;
-    width: min(720px, 94vw);
+    width: min(940px, 94vw);
     max-height: 70vh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 16px 48px rgba(0,0,0,0.5);
     transition: background 0.25s, border-color 0.25s;
+}
+
+/* Two-column body: results list on the left, live preview on the right. */
+.sr-panes {
+    display: flex;
+    flex: 1;
+    min-height: 0;
 }
 
 .sr-header {
@@ -1392,8 +1747,89 @@ body.nav-condensed .nav-doc-title {
 
 .sr-body {
     overflow-y: auto;
-    flex: 1;
+    flex: 0 0 44%;
     padding: 4px 0;
+    border-right: 1px solid var(--border-input);
+}
+
+/* Live preview pane: shows surrounding context for the active result. */
+.sr-preview {
+    flex: 1 1 56%;
+    overflow-y: auto;
+    padding: 16px 18px;
+    min-width: 0;
+}
+.sr-pv-doc {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-tab-active);
+    margin-bottom: 6px;
+}
+.sr-pv-head {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-heading-h2);
+    margin-bottom: 12px;
+    line-height: 1.35;
+}
+
+/* The preview renders real document markup. Neutralise the heavy .tab-content
+   container chrome (it's meant to be a full page panel) but keep all the
+   descendant styling (code, lists, tables, emphasis) intact. */
+.sr-preview .tab-content.sr-pv-render {
+    display: block;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+    font-size: 13.5px;
+    color: var(--text-secondary);
+}
+.sr-pv-render > :first-child { margin-top: 0; }
+.sr-pv-render > :last-child { margin-bottom: 0; }
+/* Non-matched context blocks are dimmed so the hit stands out. */
+.sr-pv-render > *:not(.sr-pv-hit) { opacity: 0.5; }
+.sr-pv-render .sr-pv-hit {
+    position: relative;
+    padding-left: 12px;
+}
+.sr-pv-render .sr-pv-hit::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 2px; bottom: 2px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--accent);
+}
+.sr-pv-render h1, .sr-pv-render h2, .sr-pv-render h3,
+.sr-pv-render h4, .sr-pv-render h5, .sr-pv-render h6 {
+    font-size: 15px;
+    margin: 6px 0;
+}
+.sr-pv-render pre { margin: 8px 0; font-size: 12px; }
+.sr-pv-render p, .sr-pv-render li { font-size: 13.5px; }
+/* Interactive/hover affordances copied in from the source are inert here. */
+.sr-pv-render .heading-anchor,
+.sr-pv-render .heading-bookmark,
+.sr-pv-render .code-copy-btn,
+.sr-pv-render .code-lang-label { display: none !important; }
+.sr-preview mark {
+    background: var(--bg-highlight);
+    color: var(--text-mark-fg);
+    border-radius: 2px;
+    padding: 0 2px;
+    font-weight: 600;
+}
+
+@media (max-width: 720px) {
+    .sr-preview { display: none; }
+    .sr-body { flex: 1; border-right: none; }
 }
 
 .sr-empty {
@@ -1620,10 +2056,11 @@ body.nav-condensed .nav-doc-title {
     background: var(--bg-code-block);
 }
 
-.nav-list a.nav-active {
-    color: var(--text-tab-active);
-    background: var(--nav-active-bg);
-    border-left-color: var(--text-tab-active);
+/* "On this page" (TOC) active heading — violet hue. */
+#navList a.nav-active {
+    color: var(--nav-hl-toc);
+    background: var(--nav-hl-toc-bg);
+    border-left-color: var(--nav-hl-toc);
 }
 
 .nav-list .nav-h1 { padding-left: 10px; font-weight: 600; color: var(--text-secondary); margin-top: 6px; }
@@ -1631,18 +2068,17 @@ body.nav-condensed .nav-doc-title {
 .nav-list .nav-h3 { padding-left: 30px; font-size: 11px; }
 .nav-list .nav-h4 { padding-left: 40px; font-size: 11px; color: var(--text-muted); }
 
-/* Active document: a solid, filled pill so it stands out distinctly from the
-   subtle heading scroll-spy highlight. */
+/* Active document — identical highlight treatment to the TOC, but a distinct
+   (blue) hue so the two sidebars are easy to tell apart. */
 #docList a.nav-doc-active {
-    color: var(--nav-doc-active-fg);
-    background: var(--nav-doc-active-bg);
-    border-left-color: transparent;
-    font-weight: 700;
-    box-shadow: 0 2px 8px var(--accent-strong);
+    color: var(--nav-hl-doc);
+    background: var(--nav-hl-doc-bg);
+    border-left-color: var(--nav-hl-doc);
+    font-weight: 600;
 }
 #docList a.nav-doc-active:hover {
-    color: var(--nav-doc-active-fg);
-    background: var(--nav-doc-active-bg);
+    color: var(--nav-hl-doc);
+    background: var(--nav-hl-doc-bg);
 }
 
 .sidebar-section + .sidebar-section {
@@ -1726,11 +2162,139 @@ body.nav-condensed .nav-doc-title {
 }
 .doc-reading-time .icon { width: 13px; height: 13px; }
 
+/* Per-document tools (Copy as Markdown / Raw view) in the meta line. Icon
+   buttons that share the navbar's liquid-glass control styling. */
+.doc-tools { display: inline-flex; align-items: center; gap: 6px; }
+.doc-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    color: var(--text-secondary);
+    background: var(--ctrl-bg);
+    border: 1px solid var(--ctrl-border);
+    box-shadow: var(--ctrl-shadow);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.doc-tool-btn:hover { color: var(--accent); background: var(--ctrl-bg-hover); box-shadow: var(--ctrl-shadow-hover); }
+.doc-tool-btn:active { transform: scale(0.94); }
+.doc-tool-btn.active { color: var(--accent); border-color: var(--accent); }
+.doc-tool-btn.copied { color: var(--text-heading-h4); border-color: var(--text-heading-h4); }
+.doc-tool-btn .icon { width: 15px; height: 15px; }
+
+/* Raw Markdown view: hide the rendered content, keep meta + raw <pre>. */
+.tab-content.raw-mode > :not(.doc-meta):not(.doc-raw) { display: none !important; }
+.doc-raw { white-space: pre; }
+.doc-raw code { color: var(--text-primary); }
+
+/* === Collapsible sections (build-time <details>, native folding) === */
+.tab-content details.sec-fold { margin: 0; }
+.tab-content .sec-summary {
+    display: block;
+    list-style: none;
+    cursor: pointer;
+    position: relative;
+    outline: none;
+}
+.tab-content .sec-summary::-webkit-details-marker { display: none; }
+.tab-content .sec-summary > h2 { margin-top: 26px; }
+.tab-content details.sec-fold:first-of-type .sec-summary > h2 { margin-top: 4px; }
+/* Disclosure caret sitting in the left margin of the heading. */
+.tab-content .sec-summary::before {
+    content: "";
+    position: absolute;
+    left: -20px;
+    top: 1.15em;
+    width: 6px;
+    height: 6px;
+    border-right: 2px solid var(--text-muted);
+    border-bottom: 2px solid var(--text-muted);
+    transform: rotate(-45deg);
+    opacity: 0;
+    transition: transform 0.2s ease, opacity 0.15s ease;
+}
+.tab-content .sec-summary:hover::before,
+.tab-content details:not([open]) > .sec-summary::before { opacity: 0.85; }
+.tab-content details[open] > .sec-summary::before { transform: rotate(45deg); }
+.tab-content details:not([open]) > .sec-summary > h2 { border-bottom-style: dashed; opacity: 0.9; }
+
+/* === Anchored line numbers + line highlight (CSS gutter, no runtime JS) === */
+.tab-content pre code.has-linenos { display: inline-block; counter-reset: cl-ln; }
+.tab-content code.has-linenos .cl {
+    display: block;
+    counter-increment: cl-ln;
+    position: relative;
+    padding-left: 3.4em;
+    scroll-margin-top: calc(var(--header-height) + 24px);
+}
+.tab-content code.has-linenos .lnr {
+    position: absolute;
+    left: 0;
+    width: 2.6em;
+    text-align: right;
+    color: var(--text-muted);
+    opacity: 0.45;
+    -webkit-user-select: none;
+    user-select: none;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+}
+.tab-content code.has-linenos .lnr::before { content: counter(cl-ln); }
+.tab-content code.has-linenos .lnr:hover { opacity: 1; color: var(--accent); }
+.tab-content code.has-linenos .cl:target,
+.tab-content code.has-linenos .cl.line-active {
+    background: var(--bg-code-inline);
+    box-shadow: inset 3px 0 0 var(--accent);
+    border-radius: 2px;
+}
+.tab-content code.has-linenos .cl.line-active .lnr { opacity: 1; color: var(--accent); }
+
+/* === "g + number" quick document jump badge === */
+.gjump-badge {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--ctrl-bg);
+    border: 1px solid var(--ctrl-border);
+    box-shadow: var(--ctrl-shadow);
+    padding: 8px 14px;
+    border-radius: 999px;
+    z-index: 200;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
+}
+.gjump-badge.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s;
+}
+.gjump-badge .gjump-label { color: var(--text-muted); font-family: var(--font-sans); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
+
 /* === Back-to-top floating button === */
 .to-top {
     position: fixed;
-    right: 22px;
-    bottom: 22px;
+    left: 50%;
+    top: calc(var(--header-height) + 12px);
     width: 40px;
     height: 40px;
     display: inline-flex;
@@ -1740,19 +2304,30 @@ body.nav-condensed .nav-doc-title {
     background: var(--ctrl-bg);
     border: 1px solid var(--ctrl-border);
     box-shadow: var(--ctrl-shadow);
-    -webkit-backdrop-filter: var(--glass-filter);
-    backdrop-filter: var(--glass-filter);
     color: var(--text-secondary);
     cursor: pointer;
     z-index: 110;
     opacity: 0;
-    transform: translateY(12px) scale(0.9);
+    /* visibility (delayed to after the fade) fully removes the button when
+       hidden. Without it the backdrop-filter keeps painting a faint glass
+       circle at opacity:0, so the button never appears to disappear when you
+       scroll back to the top. The filter itself only lives on .show. */
+    visibility: hidden;
+    transform: translateX(-50%) translateY(-12px) scale(0.9);
     pointer-events: none;
-    transition: opacity 0.3s cubic-bezier(0.32,0.72,0,1), transform 0.3s cubic-bezier(0.32,0.72,0,1), color 0.2s, background 0.2s;
+    transition: opacity 0.3s cubic-bezier(0.32,0.72,0,1), transform 0.3s cubic-bezier(0.32,0.72,0,1), visibility 0s linear 0.3s, color 0.2s, background 0.2s;
 }
-.to-top.show { opacity: 1; transform: none; pointer-events: auto; }
+.to-top.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    transition: opacity 0.3s cubic-bezier(0.32,0.72,0,1), transform 0.3s cubic-bezier(0.32,0.72,0,1), visibility 0s, color 0.2s, background 0.2s;
+}
 .to-top:hover { color: var(--accent); background: var(--ctrl-bg-hover); }
-.to-top:active { transform: scale(0.92); }
+.to-top:active { transform: translateX(-50%) scale(0.92); }
 .to-top .icon { width: 18px; height: 18px; }
 
 /* === Heading permalink anchors === */
@@ -1799,6 +2374,59 @@ body.nav-condensed .nav-doc-title {
     12%, 78% { opacity: 1; transform: translateX(-50%) translateY(0); }
     100%    { opacity: 0; transform: translateX(-50%) translateY(-3px); }
 }
+
+/* === Section bookmarks === */
+/* Star toggle revealed on heading hover, next to the permalink anchor. */
+.tab-content .heading-bookmark {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin-left: 6px;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, transform 0.15s;
+}
+.tab-content .heading-bookmark .icon { width: 0.82em; height: 0.82em; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.tab-content h1:hover .heading-bookmark,
+.tab-content h2:hover .heading-bookmark,
+.tab-content h3:hover .heading-bookmark,
+.tab-content h4:hover .heading-bookmark { opacity: 0.65; }
+.tab-content .heading-bookmark:hover { opacity: 1; color: var(--accent); transform: scale(1.12); }
+/* Bookmarked: filled star, always visible. */
+.tab-content .heading-bookmark.on { opacity: 1; color: var(--accent); }
+.tab-content .heading-bookmark.on .icon { fill: currentColor; stroke: currentColor; }
+
+/* Bookmarks list in the sidebar. */
+#bookmarkList a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: space-between;
+}
+#bookmarkList .bm-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bookmarkList .bm-doc { display: block; font-size: 10px; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
+#bookmarkList .bm-remove {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+#bookmarkList li:hover .bm-remove { opacity: 0.8; }
+#bookmarkList .bm-remove:hover { color: var(--accent); background: var(--bg-code-block); opacity: 1; }
+#bookmarkList .bm-remove svg { width: 11px; height: 11px; }
 
 /* === Callouts / admonitions (built at conversion time) === */
 .callout {
@@ -1986,25 +2614,38 @@ body.nav-condensed .nav-doc-title {
     position: relative;
     box-shadow: var(--shadow-sm);
     transition: background 0.25s, border-color 0.25s;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
+    /* Keep code horizontally scrollable but hide the scrollbar itself -- it was
+       visually noisy. Line numbers are unaffected. */
+    scrollbar-width: none;              /* Firefox */
+    -ms-overflow-style: none;           /* old Edge */
 }
-.tab-content pre::-webkit-scrollbar { height: 8px; }
-.tab-content pre::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+.tab-content pre::-webkit-scrollbar { width: 0; height: 0; display: none; }  /* WebKit/Blink */
 
 .tab-content pre code {
     background: transparent;
     color: var(--text-primary);
-    padding: 0;
+    /* inline-block sized to content (min 100% width) so the right padding is
+       part of the scrollable area -- otherwise a horizontal scroll container
+       drops padding-right and code butts against the border. */
+    display: inline-block;
+    min-width: 100%;
+    box-sizing: border-box;
+    padding: 0 20px 0 0;
     border: none;
     font-size: 13.5px;
 }
 
-/* Override highlight.js background to match our theme */
-.tab-content pre code.hljs {
+/* === Build-time syntax highlighting (Pygments) ===
+   Keep our themed <pre> background/padding; Pygments only supplies token
+   colors. The generated per-theme token rules are injected below. */
+.tab-content pre code.pygcode {
     background: transparent !important;
-    padding: 0 !important;
+    display: inline-block;
+    min-width: 100%;
+    box-sizing: border-box;
+    padding: 0 20px 0 0 !important;
 }
+%%PYGMENTS_CSS%%
 
 /* Language label on code blocks */
 .code-lang-label {
@@ -2034,8 +2675,8 @@ body.nav-condensed .nav-doc-title {
     color: var(--text-secondary);
     background: var(--bg-code-inline);
     border: 1px solid var(--border-input);
-    border-radius: 6px;
-    padding: 4px 9px;
+    border-radius: 999px;
+    padding: 4px 11px;
     cursor: pointer;
     opacity: 0;
     transform: translateY(-2px);
@@ -2257,8 +2898,10 @@ body.nav-condensed .nav-doc-title {
         padding-right: max(12px, env(safe-area-inset-right));
     }
     /* Let the document picker take whatever width is left (an auto left margin
-       would otherwise swallow the free space and block flex-grow). */
-    .doc-selector { flex: 1 1 auto; margin-left: 0; }
+       would otherwise swallow the free space and block flex-grow). On phones we
+       keep the original in-line order rather than the desktop right-end layout. */
+    .doc-selector { flex: 1 1 auto; margin-left: 0; order: 0; }
+    .search-widget { margin-left: 0; }
     .doc-select { min-width: 0; max-width: none; width: 100%; }
 
     .content-area {
@@ -2319,8 +2962,19 @@ body.nav-condensed .nav-doc-title {
 
 /* === Print === */
 @media print {
-    .header-bar, .sidebar-nav, .toc-sidebar, .sidebar-toggle { display: none !important; }
+    .header-bar, .sidebar-nav, .toc-sidebar, .sidebar-toggle, .to-top,
+    .code-copy-btn, .heading-anchor, .doc-tools, .gjump-badge,
+    .code-lang-label { display: none !important; }
+    /* Print every document, not just the active one. */
     .tab-content { display: block !important; page-break-after: always; }
+    /* Never leave a section (or raw view) folded/hidden on paper. */
+    .tab-content.raw-mode > :not(.doc-meta):not(.doc-raw) { display: revert !important; }
+    .doc-raw { display: none !important; }
+    details.sec-fold > .sec-body { display: block !important; }
+    .sec-summary::before { display: none !important; }
+    /* Line-number gutters add noise on paper; keep the code, drop the numbers. */
+    code.has-linenos .cl { padding-left: 0 !important; }
+    code.has-linenos .lnr { display: none !important; }
     body { background: white; color: #222; }
     .search-results { display: none !important; }
     .page-layout { display: block; }
@@ -2375,8 +3029,13 @@ body.nav-condensed .nav-doc-title {
       <input type="text" id="searchInput" placeholder="Search across all documentation..." autofocus>
       <span class="sr-count" id="srCount"></span>
     </div>
-    <div class="sr-body" id="srBody">
-      <div class="sr-empty">Type to search across all tabs</div>
+    <div class="sr-panes">
+      <div class="sr-body" id="srBody">
+        <div class="sr-empty">Type to search across all tabs</div>
+      </div>
+      <div class="sr-preview" id="srPreview">
+        <div class="sr-empty sr-pv-hint">Preview appears here</div>
+      </div>
     </div>
   </div>
 </div>
@@ -2397,6 +3056,7 @@ body.nav-condensed .nav-doc-title {
   <button class="to-top" id="toTop" title="Back to top" aria-label="Back to top">
     <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.47 7.78a.75.75 0 0 1 0-1.06l4-4a.75.75 0 0 1 1.06 0l4 4a.75.75 0 0 1-1.06 1.06L8.75 4.81V13a.75.75 0 0 1-1.5 0V4.81L4.53 7.78a.75.75 0 0 1-1.06 0Z"></path></svg>
   </button>
+  <div class="gjump-badge" id="gjumpBadge" aria-hidden="true"><span class="gjump-label">Go to</span><span id="gjumpNum"></span></div>
   <nav class="toc-sidebar collapsed" id="tocSidebar">
     <div class="sidebar-section" id="tocSection">
       <div class="nav-title">
@@ -2404,6 +3064,13 @@ body.nav-condensed .nav-doc-title {
         On this page
       </div>
       <ul class="nav-list" id="navList"></ul>
+    </div>
+    <div class="sidebar-section" id="bookmarkSection" hidden>
+      <div class="nav-title">
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.2.6L8 12.09l-3.8 2.76a.75.75 0 0 1-1.2-.6Zm1.75-.25a.25.25 0 0 0-.25.25v10.026l3.05-2.213a.75.75 0 0 1 .9 0l3.05 2.213V2.75a.25.25 0 0 0-.25-.25Z"></path></svg>
+        Bookmarks
+      </div>
+      <ul class="nav-list" id="bookmarkList"></ul>
     </div>
   </nav>
 </div>
@@ -2446,6 +3113,12 @@ function renderMathInNode(node) {
 }
 
 const CLOCK_ICON = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8.75-4.25v3.94l2.4 2.4a.75.75 0 0 1-1.06 1.06l-2.62-2.62a.75.75 0 0 1-.22-.53V3.75a.75.75 0 0 1 1.5 0Z"></path></svg>';
+const COPY_ICON = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path></svg>';
+const CHECK_ICON = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L1.72 8.78a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>';
+const CODE_ICON = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m11.28 3.22 4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L13.94 8l-3.72-3.72a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215Zm-6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Z"></path></svg>';
+// Star (outline; filled via CSS when active) for section bookmarks.
+const STAR_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.46L12 17.9l-5.8 3.05 1.11-6.46-4.7-4.58 6.49-.94Z" stroke-linejoin="round"/></svg>';
+const XMARK_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></svg>';
 
 TAB_DATA.forEach((tab, idx) => {
     const opt = document.createElement('option');
@@ -2458,9 +3131,9 @@ TAB_DATA.forEach((tab, idx) => {
     panel.id = 'panel-' + idx;
     panel.dataset.dir = tab.dir || '';
     panel.innerHTML = tab.body;
-    if (window.MathJax && window.MathJax.typesetPromise) {
-        window.MathJax.typesetPromise([panel]).catch(() => {});
-    }
+    // Code decoration, table wrapping and MathJax typesetting are deferred to
+    // the first time this panel is shown (see renderPanelOnce), so opening the
+    // page stays cheap no matter how many documents are bundled.
 
     // Breadcrumb + reading-time meta line (prepended, built once).
     const meta = document.createElement('div');
@@ -2475,6 +3148,52 @@ TAB_DATA.forEach((tab, idx) => {
         '<span class="doc-breadcrumb">' + crumbHtml + '</span>' +
         '<span class="doc-reading-time">' + CLOCK_ICON +
         (tab.mins || 1) + ' min read \u00b7 ' + words + ' words</span>';
+
+    // Per-doc tools: copy the raw Markdown, or toggle a raw source view. Icon
+    // buttons, styled to match the navbar's glass controls.
+    const tools = document.createElement('span');
+    tools.className = 'doc-tools';
+    const copyMdBtn = document.createElement('button');
+    copyMdBtn.type = 'button';
+    copyMdBtn.className = 'doc-tool-btn';
+    copyMdBtn.title = 'Copy as Markdown';
+    copyMdBtn.setAttribute('aria-label', 'Copy as Markdown');
+    copyMdBtn.innerHTML = COPY_ICON;
+    copyMdBtn.addEventListener('click', () => {
+        const done = () => {
+            copyMdBtn.innerHTML = CHECK_ICON;
+            copyMdBtn.classList.add('copied');
+            setTimeout(() => { copyMdBtn.innerHTML = COPY_ICON; copyMdBtn.classList.remove('copied'); }, 1600);
+        };
+        const text = tab.raw || '';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+        } else {
+            fallbackCopy(text, done);
+        }
+    });
+    const rawBtn = document.createElement('button');
+    rawBtn.type = 'button';
+    rawBtn.className = 'doc-tool-btn';
+    rawBtn.title = 'Toggle raw Markdown view';
+    rawBtn.setAttribute('aria-label', 'Toggle raw Markdown view');
+    rawBtn.innerHTML = CODE_ICON;
+    rawBtn.addEventListener('click', () => {
+        const on = panel.classList.toggle('raw-mode');
+        rawBtn.classList.toggle('active', on);
+        rawBtn.title = on ? 'Show rendered view' : 'Toggle raw Markdown view';
+        if (on && !panel.querySelector('.doc-raw')) {
+            const pre = document.createElement('pre');
+            pre.className = 'doc-raw';
+            const code = document.createElement('code');
+            code.textContent = tab.raw || '';
+            pre.appendChild(code);
+            panel.appendChild(pre);
+        }
+    });
+    tools.appendChild(copyMdBtn);
+    tools.appendChild(rawBtn);
+    meta.appendChild(tools);
     panel.insertBefore(meta, panel.firstChild);
 
     tabPanels.appendChild(panel);
@@ -2504,7 +3223,7 @@ function createTreeHtml(node, parentPath = '') {
     Object.keys(node.dirs).sort().forEach(dirName => {
         const dirNode = node.dirs[dirName];
         const li = document.createElement('li');
-        li.className = 'nav-dir-item expanded'; // expanded by default
+        li.className = 'nav-dir-item'; // collapsed by default; only the open file's directory is expanded on activation
         
         const header = document.createElement('div');
         header.className = 'nav-dir-header';
@@ -2717,30 +3436,32 @@ function fallbackCopy(text, done) {
     document.body.removeChild(ta);
 }
 
-function highlightAllCode() {
-    document.querySelectorAll('.tab-content pre code').forEach(block => {
-        if (block.dataset.highlighted === '1') return;
+/* Code blocks are already colorized at build time (Pygments); at runtime we
+   only add the language label + copy button, and only for the panel being
+   viewed. */
+function decorateCodeBlocks(root) {
+    root.querySelectorAll('pre code').forEach(block => {
+        if (block.dataset.decorated === '1') return;
         const pre = block.closest('pre');
-        const langClass = Array.from(block.classList).find(c => c.startsWith('language-'));
-        if (langClass) {
-            const lang = langClass.replace('language-', '');
+        if (!pre) return;
+        const lang = block.dataset.lang ||
+            (Array.from(block.classList).find(c => c.startsWith('language-')) || '')
+                .replace('language-', '');
+        if (lang) {
             const label = document.createElement('span');
             label.className = 'code-lang-label';
             label.textContent = lang;
             pre.appendChild(label);
         }
-        hljs.highlightElement(block);
         addCopyButton(pre, block);
-        block.dataset.highlighted = '1';
+        block.dataset.decorated = '1';
     });
 }
 
-highlightAllCode();
-
 /* ───── Wrap tables so they scroll horizontally on narrow screens ───── */
 /* - Nagesh N Nazare - */
-function wrapTables() {
-    document.querySelectorAll('.tab-content table').forEach(table => {
+function wrapTables(root) {
+    root.querySelectorAll('table').forEach(table => {
         if (table.parentElement && table.parentElement.classList.contains('table-scroll')) return;
         const wrap = document.createElement('div');
         wrap.className = 'table-scroll';
@@ -2748,15 +3469,30 @@ function wrapTables() {
         wrap.appendChild(table);
     });
 }
-wrapTables();
+
+/* Do the per-panel DOM work (labels/copy buttons, table wrapping, math) exactly
+   once, lazily, the first time a document is opened. */
+function renderPanelOnce(idx) {
+    const panel = document.getElementById('panel-' + idx);
+    if (!panel || panel.dataset.rendered === '1') return;
+    panel.dataset.rendered = '1';
+    decorateCodeBlocks(panel);
+    wrapTables(panel);
+    renderMathInNode(panel);
+}
+
+/* Before printing / Save-as-PDF, make sure every panel is fully rendered (code
+   labels, wrapped tables, typeset math) so the whole set captures correctly --
+   the print stylesheet forces all panels visible. */
+function renderAllPanels() {
+    for (let i = 0; i < TAB_DATA.length; i++) renderPanelOnce(i);
+}
+window.addEventListener('beforeprint', renderAllPanels);
 
 /* ───── Theme toggle ───── */
 /* - Nagesh N Nazare - */
 
-const HLJS_DARK = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css';
-const HLJS_LIGHT = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs.min.css';
 const themeToggleBtn = document.getElementById('themeToggle');
-const hljsLink = document.getElementById('hljs-theme');
 
 const ICON_SUN = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Zm13 0a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8Zm-8 5a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13Zm3.536-2.464a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 0 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061Zm-8.132 0a.75.75 0 0 1 1.06 1.061l-1.06 1.06a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734Z"></path></svg>';
 const ICON_MOON = '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"></path></svg>';
@@ -2773,7 +3509,6 @@ function osTheme() { return (darkMql && darkMql.matches) ? 'dark' : 'light'; }
 // would look like an explicit choice and we'd stop following the OS.
 function setTheme(theme, persist) {
     document.body.setAttribute('data-theme', theme);
-    hljsLink.href = theme === 'light' ? HLJS_LIGHT : HLJS_DARK;
     themeToggleBtn.innerHTML = (theme === 'light' ? ICON_SUN : ICON_MOON);
     themeToggleBtn.title = theme === 'light'
         ? 'Switch to dark mode (Ctrl+Shift+L)'
@@ -2818,6 +3553,86 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+/* ───── Quick document jump: press "g", type a document number, then Enter
+   (or just pause) to jump. Escape or "g" again cancels. ───── */
+/* - Nagesh N Nazare - */
+(function initGotoJump() {
+    const badge = document.getElementById('gjumpBadge');
+    const numEl = document.getElementById('gjumpNum');
+    let active = false, buffer = '', timer = null;
+
+    function isTyping() {
+        const el = document.activeElement;
+        return el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+    }
+    function searchOpen() {
+        const ov = document.getElementById('searchOverlay');
+        return ov && ov.classList.contains('open');
+    }
+    function show() {
+        if (!badge) return;
+        if (numEl) numEl.textContent = buffer || '#';
+        badge.classList.add('show');
+    }
+    function reset() {
+        active = false; buffer = '';
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (badge) badge.classList.remove('show');
+    }
+    function arm() {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(commit, 1100);
+    }
+    function commit() {
+        const n = parseInt(buffer, 10);
+        reset();
+        if (!isNaN(n) && n >= 1 && n <= TAB_DATA.length) {
+            if (typeof pushHistory === 'function') pushHistory();
+            activateTab(n - 1);
+        }
+    }
+    // gn / gp: jump to the next / previous document.
+    function step(delta) {
+        const cur = (typeof currentTabIdx === 'function') ? currentTabIdx() : 0;
+        const next = Math.min(Math.max(cur + delta, 0), TAB_DATA.length - 1);
+        reset();
+        if (next !== cur) {
+            if (typeof pushHistory === 'function') pushHistory();
+            activateTab(next);
+        }
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (searchOpen()) return;
+        if (!active) {
+            if (e.key === 'g' && !isTyping()) {
+                e.preventDefault();
+                active = true; buffer = '';
+                show(); arm();
+            }
+            return;
+        }
+        if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            buffer += e.key;
+            show(); arm();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+        } else if (buffer === '' && (e.key === 'n' || e.key === 'N')) {
+            e.preventDefault();
+            step(1);
+        } else if (buffer === '' && (e.key === 'p' || e.key === 'P')) {
+            e.preventDefault();
+            step(-1);
+        } else {
+            e.preventDefault();
+            reset();
+        }
+    });
+})();
+
 /* ───── Tab activation ───── */
 /* - Nagesh N Nazare - */
 
@@ -2825,12 +3640,15 @@ function activateTab(idx, resetScroll) {
     if (resetScroll === undefined) resetScroll = true;
     document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
     document.getElementById('panel-' + idx).classList.add('active');
+    renderPanelOnce(idx);
     docSelect.value = String(idx);
     docList.querySelectorAll('a').forEach(a => {
         a.classList.toggle('nav-doc-active', parseInt(a.dataset.docIdx, 10) === idx);
     });
     const activeLink = docList.querySelector(`a[data-doc-idx="${idx}"]`);
     if (activeLink) {
+        // Keep only the open file's directory chain expanded; collapse the rest.
+        docList.querySelectorAll('.nav-dir-item.expanded').forEach(d => d.classList.remove('expanded'));
         let parent = activeLink.closest('.nav-dir-item');
         while (parent) {
             parent.classList.add('expanded');
@@ -2869,10 +3687,99 @@ function activateTab(idx, resetScroll) {
    reopening the file resumes where you left off. Writes happen only on tab
    switch, panel toggle and page hide -- never during scrolling. */
 /* - Nagesh N Nazare - */
+// All persisted state is namespaced per generated doc set, because every
+// file:// page shares a single localStorage origin -- without this, bookmarks,
+// theme and last-open state would leak between different generated HTML files.
+const STORAGE_NS = '%%STORAGE_NS%%';
 const LS = {
-    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    get(k) { try { return localStorage.getItem(STORAGE_NS + k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(STORAGE_NS + k, v); } catch (e) {} },
 };
+
+/* ───── Section bookmarks (persisted in localStorage) ───── */
+/* - Nagesh N Nazare - */
+const BOOKMARKS_KEY = 'doc-bookmarks';
+let bookmarks = (function () {
+    try { return JSON.parse(LS.get(BOOKMARKS_KEY) || '[]') || []; }
+    catch (e) { return []; }
+})();
+
+function saveBookmarks() { LS.set(BOOKMARKS_KEY, JSON.stringify(bookmarks)); }
+function isBookmarked(tab, id) { return bookmarks.some(b => b.tab === tab && b.id === id); }
+
+function toggleBookmark(tab, id, title) {
+    const i = bookmarks.findIndex(b => b.tab === tab && b.id === id);
+    let on;
+    if (i >= 0) { bookmarks.splice(i, 1); on = false; }
+    else {
+        bookmarks.push({ tab: tab, id: id, title: title,
+            doc: (TAB_DATA[tab] ? cleanName(TAB_DATA[tab].name) : '') });
+        on = true;
+    }
+    saveBookmarks();
+    renderBookmarks();
+    return on;
+}
+
+function removeBookmark(tab, id) {
+    const i = bookmarks.findIndex(b => b.tab === tab && b.id === id);
+    if (i < 0) return;
+    bookmarks.splice(i, 1);
+    saveBookmarks();
+    renderBookmarks();
+    const esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id.replace(/(["\\])/g, '\\$1');
+    const star = document.querySelector('#panel-' + tab + ' .heading-bookmark[data-hid="' + esc + '"]');
+    if (star) { star.classList.remove('on'); star.title = 'Bookmark this section'; }
+}
+
+// Reflect stored state onto the (lazily created) heading stars of a panel.
+function syncBookmarkStars(panelIdx) {
+    const panel = document.getElementById('panel-' + panelIdx);
+    if (!panel) return;
+    panel.querySelectorAll('.heading-bookmark').forEach(b => {
+        const on = isBookmarked(panelIdx, b.dataset.hid);
+        b.classList.toggle('on', on);
+        b.title = on ? 'Remove bookmark' : 'Bookmark this section';
+    });
+}
+
+function renderBookmarks() {
+    const section = document.getElementById('bookmarkSection');
+    const list = document.getElementById('bookmarkList');
+    if (!section || !list) return;
+    list.innerHTML = '';
+    if (!bookmarks.length) { section.hidden = true; return; }
+    section.hidden = false;
+    bookmarks.forEach(b => {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = '#';
+        a.className = 'nav-h2';
+        a.title = (b.title || '') + (b.doc ? ' \u2014 ' + b.doc : '');
+        a.innerHTML = '<span class="bm-label">' + escapeHtml(b.title || '(section)') +
+            '<span class="bm-doc">' + escapeHtml(b.doc || '') + '</span></span>';
+        a.addEventListener('click', e => {
+            e.preventDefault();
+            if (typeof pushHistory === 'function') pushHistory();
+            gotoAnchor(b.tab, b.id);
+        });
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'bm-remove';
+        rm.title = 'Remove bookmark';
+        rm.setAttribute('aria-label', 'Remove bookmark');
+        rm.innerHTML = XMARK_ICON;
+        rm.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            removeBookmark(b.tab, b.id);
+        });
+        a.appendChild(rm);
+        li.appendChild(a);
+        list.appendChild(li);
+    });
+}
+renderBookmarks();
 
 function persistScroll() {
     LS.set('doc-last-idx', String(currentTabIdx()));
@@ -2888,36 +3795,53 @@ document.addEventListener('visibilitychange', function () {
 
 const searchIndex = [];
 
+// Only leaf blocks (and headings) are indexed. Wrapper containers
+// (div, details, ul, table, ...) are recursed into but NOT indexed
+// themselves, otherwise the same region gets added multiple times
+// (container + child + leaf) and search results — and their previews —
+// come out as consecutive near-duplicates.
+const LEAF_BLOCK = /^(P|LI|TD|TH|BLOCKQUOTE|PRE|DT|DD|FIGCAPTION|SUMMARY|H[1-6])$/;
+const HAS_BLOCK_DESC = 'p,li,td,th,blockquote,pre,dt,dd,figcaption,summary,' +
+    'h1,h2,h3,h4,h5,h6,ul,ol,dl,table,thead,tbody,tr,div,details,section,article,figure';
+
+/* Flatten a tab body into an ordered list of leaf blocks. Shared by the index
+   builder and the live preview so a result's blockNo maps back to the exact
+   source element (letting the preview clone real, formatted HTML). */
+function collectBlocks(root) {
+    const out = [];
+    let currentHeading = '';
+    (function walk(node) {
+        for (const child of node.childNodes) {
+            if (child.nodeType !== Node.ELEMENT_NODE) continue;
+            const tag = child.tagName;
+            if (/^H[1-6]$/.test(tag)) currentHeading = child.textContent.trim();
+            if (LEAF_BLOCK.test(tag)) {
+                out.push({ el: child, heading: currentHeading, tag: tag });
+                continue;
+            }
+            if (child.querySelector(HAS_BLOCK_DESC)) walk(child);
+            else out.push({ el: child, heading: currentHeading, tag: tag });
+        }
+    })(root);
+    return out;
+}
+
 TAB_DATA.forEach((tab, tabIdx) => {
     const tmp = document.createElement('div');
     tmp.innerHTML = tab.body;
-    let currentHeading = '';
-
-    function walk(node) {
-        for (const child of node.childNodes) {
-            if (child.nodeType === Node.ELEMENT_NODE) {
-                const tag = child.tagName;
-                if (/^H[1-6]$/.test(tag)) {
-                    currentHeading = child.textContent.trim();
-                }
-                const text = child.textContent.trim();
-                if (text.length > 0) {
-                    searchIndex.push({
-                        tabIdx: tabIdx,
-                        tabName: tab.name,
-                        heading: currentHeading,
-                        text: text,
-                        tag: tag
-                    });
-                }
-                if (/^(P|LI|TD|TH|BLOCKQUOTE|PRE|H[1-6])$/.test(tag)) {
-                    continue;
-                }
-                walk(child);
-            }
+    collectBlocks(tmp).forEach((b, blockNo) => {
+        const text = b.el.textContent.trim();
+        if (text.length > 0) {
+            searchIndex.push({
+                tabIdx: tabIdx,
+                tabName: tab.name,
+                heading: b.heading,
+                text: text,
+                tag: b.tag,
+                blockNo: blockNo
+            });
         }
-    }
-    walk(tmp);
+    });
 });
 
 /* ───── Search overlay logic ───── */
@@ -2927,6 +3851,7 @@ const overlay = document.getElementById('searchOverlay');
 const searchInput = document.getElementById('searchInput');
 const searchTrigger = document.getElementById('searchTrigger');
 const srBody = document.getElementById('srBody');
+const srPreview = document.getElementById('srPreview');
 const srCount = document.getElementById('srCount');
 let srActiveIdx = -1;
 let srResults = [];
@@ -2936,6 +3861,7 @@ function openSearch() {
     searchInput.value = '';
     searchInput.focus();
     srBody.innerHTML = '<div class="sr-empty">Type to search across all tabs</div>';
+    if (srPreview) srPreview.innerHTML = '<div class="sr-empty sr-pv-hint">Preview appears here</div>';
     srCount.textContent = '';
     srActiveIdx = -1;
     srResults = [];
@@ -2997,9 +3923,103 @@ function updateActiveResult() {
     });
     const active = srBody.querySelector('.sr-active');
     if (active) active.scrollIntoView({ block: 'nearest' });
+    renderPreview(srResults[srActiveIdx]);
 }
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/* Parse a tab body into leaf blocks on demand, caching the most recent one so
+   scrolling through several results in the same doc doesn't re-parse each time. */
+let pvCache = { tabIdx: -1, blocks: null };
+function pvBlocks(tabIdx) {
+    if (pvCache.tabIdx === tabIdx && pvCache.blocks) return pvCache.blocks;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = (TAB_DATA[tabIdx] && TAB_DATA[tabIdx].body) || '';
+    pvCache = { tabIdx: tabIdx, blocks: collectBlocks(tmp), root: tmp };
+    return pvCache.blocks;
+}
+
+/* Wrap every case-insensitive occurrence of query inside a subtree's text
+   nodes with <mark>, leaving the surrounding formatted markup intact. */
+function highlightIn(root, query) {
+    if (!query) return;
+    const re = new RegExp(escapeRegex(query), 'gi');
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(tn => {
+        const val = tn.nodeValue;
+        re.lastIndex = 0;
+        if (!re.test(val)) return;
+        re.lastIndex = 0;
+        const frag = document.createDocumentFragment();
+        let last = 0, m;
+        while ((m = re.exec(val)) !== null) {
+            if (m.index > last) frag.appendChild(document.createTextNode(val.slice(last, m.index)));
+            const mk = document.createElement('mark');
+            mk.textContent = m[0];
+            frag.appendChild(mk);
+            last = m.index + m[0].length;
+            if (m.index === re.lastIndex) re.lastIndex++;
+        }
+        if (last < val.length) frag.appendChild(document.createTextNode(val.slice(last)));
+        tn.parentNode.replaceChild(frag, tn);
+    });
+}
+
+function pvIsLight(el) {
+    return el && el.textContent.trim().length > 0 &&
+        !el.querySelector('img,svg,canvas,video');
+}
+
+/* Render the actual matched block (plus a light sibling on each side for
+   context) as formatted HTML, reusing the page's .tab-content styling so code,
+   lists, tables and emphasis look just like they do in the document. */
+function renderPreview(result) {
+    if (!srPreview) return;
+    if (!result) {
+        srPreview.innerHTML = '<div class="sr-empty sr-pv-hint">Preview appears here</div>';
+        return;
+    }
+    const query = searchInput.value.trim();
+
+    const doc = document.createElement('div');
+    doc.className = 'sr-pv-doc';
+    doc.textContent = result.tabName;
+    const head = document.createElement('div');
+    head.className = 'sr-pv-head';
+    if (result.heading) head.textContent = result.heading;
+
+    const render = document.createElement('div');
+    render.className = 'sr-pv-render tab-content';
+
+    const blocks = pvBlocks(result.tabIdx);
+    const block = blocks && blocks[result.blockNo];
+    const el = block && block.el;
+
+    if (el) {
+        const prev = el.previousElementSibling;
+        const next = el.nextElementSibling;
+        if (pvIsLight(prev)) render.appendChild(prev.cloneNode(true));
+        const hit = el.cloneNode(true);
+        hit.classList.add('sr-pv-hit');
+        render.appendChild(hit);
+        if (pvIsLight(next)) render.appendChild(next.cloneNode(true));
+        highlightIn(render, query);
+    } else {
+        // Fallback: block lookup failed, show plain matched text.
+        const p = document.createElement('p');
+        p.textContent = result.text;
+        render.appendChild(p);
+        highlightIn(render, query);
+    }
+
+    srPreview.innerHTML = '';
+    srPreview.appendChild(doc);
+    if (result.heading) srPreview.appendChild(head);
+    srPreview.appendChild(render);
+}
 
 function highlightSnippet(text, query, maxLen) {
     const lower = text.toLowerCase();
@@ -3031,6 +4051,7 @@ function runSearch() {
         srCount.textContent = '';
         srResults = [];
         srActiveIdx = -1;
+        renderPreview(null);
         return;
     }
 
@@ -3055,6 +4076,7 @@ function runSearch() {
         srBody.innerHTML = '<div class="sr-empty">No results for "' +
             query.replace(/</g,'&lt;') + '"</div>';
         srCount.textContent = '0 results';
+        renderPreview(null);
         return;
     }
 
@@ -3076,7 +4098,16 @@ function runSearch() {
             const idx = parseInt(el.dataset.ridx, 10);
             navigateToResult(srResults[idx]);
         });
+        el.addEventListener('mouseenter', () => {
+            const idx = parseInt(el.dataset.ridx, 10);
+            if (idx !== srActiveIdx) {
+                srActiveIdx = idx;
+                updateActiveResult();
+            }
+        });
     });
+
+    renderPreview(matches[0]);
 }
 
 function navigateToResult(result) {
@@ -3184,6 +4215,22 @@ function buildToc(panelIdx) {
                 scrollToTarget(h);
             });
             h.appendChild(perma);
+
+            // Bookmark star toggle for this section.
+            const bm = document.createElement('button');
+            bm.type = 'button';
+            bm.className = 'heading-bookmark';
+            bm.dataset.hid = headingId;
+            bm.innerHTML = STAR_ICON;
+            const bmTitle = title;
+            bm.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const on = toggleBookmark(panelIdx, headingId, bmTitle);
+                bm.classList.toggle('on', on);
+                bm.title = on ? 'Remove bookmark' : 'Bookmark this section';
+            });
+            h.appendChild(bm);
         }
         const level = h.tagName.substring(1);
         const li = document.createElement('li');
@@ -3201,6 +4248,7 @@ function buildToc(panelIdx) {
         navList.appendChild(li);
         currentTocHeadings.push({ el: h, link: a });
     });
+    if (typeof syncBookmarkStars === 'function') syncBookmarkStars(panelIdx);
     updateScrollSpy();
 }
 
@@ -3218,7 +4266,6 @@ function updateScrollSpy() {
         const max = document.documentElement.scrollHeight - window.innerHeight;
         const pct = max > 0 ? Math.min(100, (scrollY / max) * 100) : 0;
         if (readProgress) readProgress.style.width = pct + '%';
-        if (toTopBtn) toTopBtn.classList.toggle('show', scrollY > 480);
 
         if (currentTocHeadings.length === 0) return;
         const offset = 80;
@@ -3248,12 +4295,18 @@ function updateNavCondense() {
     const NAV_TOP = 8;       // always expanded near the very top
     const NAV_TRIGGER = 72;  // must scroll past this before condensing
     const DELTA = 5;         // ignore tiny jitters
+    // The back-to-top button mirrors the navbar, but inverted: it APPEARS when
+    // you scroll down (navbar condenses) and hides when you scroll up (navbar
+    // re-expands), instead of a fixed scroll-distance threshold.
     if (y <= NAV_TOP) {
         document.body.classList.remove('nav-condensed');
+        if (toTopBtn) toTopBtn.classList.remove('show');
     } else if (y > navLastY + DELTA && y > NAV_TRIGGER) {
-        document.body.classList.add('nav-condensed');   // scrolling down
+        document.body.classList.add('nav-condensed');    // scrolling down
+        if (toTopBtn) toTopBtn.classList.add('show');
     } else if (y < navLastY - DELTA) {
-        document.body.classList.remove('nav-condensed'); // scrolling up
+        document.body.classList.remove('nav-condensed');  // scrolling up
+        if (toTopBtn) toTopBtn.classList.remove('show');
     }
     navLastY = y;
 }
@@ -3273,6 +4326,28 @@ if (toTopBtn) {
 const tocSidebar = document.getElementById('tocSidebar');
 const tocToggle = document.getElementById('tocToggle');
 
+/* Expand only the open file's directory chain and scroll it into view inside
+   the sidebar, so opening the sidebar (Ctrl/⌘+B) always points at the file
+   you are reading -- even inside a long, deeply-nested document list. */
+function revealActiveInSidebar() {
+    const idx = currentTabIdx();
+    const activeLink = docList.querySelector('a[data-doc-idx="' + idx + '"]');
+    if (!activeLink) return;
+    docList.querySelectorAll('.nav-dir-item.expanded').forEach(d => d.classList.remove('expanded'));
+    let parent = activeLink.closest('.nav-dir-item');
+    while (parent) {
+        parent.classList.add('expanded');
+        parent = parent.parentElement.closest('.nav-dir-item');
+    }
+    // Center the active entry once the open animation has laid the list out.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        const cRect = sidebarNav.getBoundingClientRect();
+        const lRect = activeLink.getBoundingClientRect();
+        sidebarNav.scrollTop += (lRect.top - cRect.top)
+            - (sidebarNav.clientHeight / 2) + (lRect.height / 2);
+    }));
+}
+
 function toggleSidebar() {
     const collapsed = sidebarNav.classList.toggle('collapsed');
     document.body.classList.toggle('sidebar-collapsed', collapsed);
@@ -3280,6 +4355,7 @@ function toggleSidebar() {
         tocSidebar.classList.add('collapsed');
         document.body.classList.add('toc-collapsed');
     }
+    if (!collapsed) revealActiveInSidebar();
     LS.set('doc-sidebar', collapsed ? 'closed' : 'open');
 }
 
@@ -3333,6 +4409,13 @@ function findById(id, preferredPanel) {
 }
 
 function scrollToTarget(target) {
+    // If the target sits inside a folded <details> section, open its ancestor
+    // chain first so the scroll lands on visible content.
+    let d = target.closest ? target.closest('details') : null;
+    while (d) {
+        d.open = true;
+        d = d.parentElement ? d.parentElement.closest('details') : null;
+    }
     requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 }
 
@@ -3397,6 +4480,21 @@ document.addEventListener('click', function(e) {
     const href = link.getAttribute('href');
     if (!href) return;
 
+    // Code line-number anchor: highlight that line and scroll to it (kept out
+    // of the app's #tab-N hash state, so we mark it with a class rather than
+    // relying on :target which the tab-state hash would clobber).
+    if (link.classList.contains('lnr')) {
+        e.preventDefault();
+        const lid = href.substring(1);
+        const cl = findById(lid, ownerPanel);
+        if (cl) {
+            ownerPanel.querySelectorAll('.cl.line-active').forEach(x => x.classList.remove('line-active'));
+            cl.classList.add('line-active');
+            scrollToTarget(cl);
+        }
+        return;
+    }
+
     // In-page anchor: resolve within the panel that owns the link first.
     if (href.charAt(0) === '#') {
         const id = href.substring(1);
@@ -3440,10 +4538,32 @@ if (window.innerWidth > 1024) {
     }
 }
 
+/* Distinguish a genuine reload/refresh from a fresh open (a clicked link, a
+   typed URL, or a bookmark). On a refresh we keep the reader where they were;
+   on a fresh open we always start on the first document. */
+function isReloadNavigation() {
+    try {
+        const nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+        if (nav && nav.type) return nav.type === 'reload' || nav.type === 'back_forward';
+    } catch (e) {}
+    // Fallback for older browsers.
+    return !!(performance.navigation && (performance.navigation.type === 1 || performance.navigation.type === 2));
+}
+const wasReload = isReloadNavigation();
+
 const hash = location.hash || '';
 const tabMatch = hash.match(/^#tab-(\d+)$/);
 if (tabMatch) {
-    activateTab(Math.min(parseInt(tabMatch[1], 10), TAB_DATA.length - 1));
+    // A refresh preserves "#tab-N", so this keeps us on the same document.
+    // Restore the scroll position too when it is a genuine reload.
+    const idx = Math.min(parseInt(tabMatch[1], 10), TAB_DATA.length - 1);
+    activateTab(idx, !wasReload);
+    if (wasReload) {
+        const lastY = parseInt(LS.get('doc-last-y'), 10);
+        if (!isNaN(lastY) && lastY > 0) {
+            requestAnimationFrame(() => window.scrollTo({ top: lastY, behavior: 'auto' }));
+        }
+    }
 } else if (hash.length > 1) {
     const targetId = hash.substring(1);
     const target = document.getElementById(targetId);
@@ -3461,8 +4581,8 @@ if (tabMatch) {
     } else {
         activateTab(0);
     }
-} else {
-    // No explicit target: resume the last-read document + scroll position.
+} else if (wasReload) {
+    // Refreshed before any tab was recorded in the URL: resume last document.
     const lastIdx = parseInt(LS.get('doc-last-idx'), 10);
     const lastY = parseInt(LS.get('doc-last-y'), 10);
     if (!isNaN(lastIdx) && lastIdx >= 0 && lastIdx < TAB_DATA.length) {
@@ -3473,13 +4593,22 @@ if (tabMatch) {
     } else {
         activateTab(0);
     }
+} else {
+    // Fresh open (clicked link / newly opened file): always start on tab 1.
+    activateTab(0);
 }
 </script>
 
 </body>
 </html>'''
 
-final_html = HTML_TEMPLATE.replace('%%TAB_DATA%%', tab_data_js).replace('%%DOC_TITLE%%', escaped_title)
+pygments_css = build_pygments_css()
+
+final_html = (HTML_TEMPLATE
+              .replace('%%TAB_DATA%%', tab_data_js)
+              .replace('%%DOC_TITLE%%', escaped_title)
+              .replace('%%STORAGE_NS%%', storage_ns)
+              .replace('%%PYGMENTS_CSS%%', pygments_css))
 
 with open(out_file, 'w') as f:
     f.write(final_html)
