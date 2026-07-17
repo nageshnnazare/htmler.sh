@@ -26,6 +26,12 @@
 
 ## Quick start
 
+### No Download
+```bash
+wget -qO- https://raw.githubusercontent.com/nageshnnazare/htmler/refs/heads/main/htmler.sh | bash -s -- -o index.html
+```
+
+### Downloaded local copy
 ```bash
 # Make it executable once
 chmod +x htmler.sh
