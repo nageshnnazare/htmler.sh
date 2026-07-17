@@ -11,19 +11,6 @@
 
 ---
 
-## Highlights
-
-- **One file, everything inside.** The output is a single `.html` you can email, host on GitHub Pages, or open straight from disk.
-- **Multi-document navigation.** A sidebar lists every document (with `README` pinned first); a dropdown and full-text search jump between them instantly.
-- **On-this-page table of contents** with scroll-spy that tracks your position.
-- **Responsive by design.** Works edge-to-edge on phones and iPads — drawers collapse into overlays, tables scroll, and the layout respects iOS safe areas.
-- **Light & dark themes** with an Apple-style "liquid glass" navbar; the choice is remembered across visits.
-- **Five color themes** — VS Code, Monokai, One Dark, High Contrast, and the original Default — each with its own light/dark variant. Switch from a navbar picker; the whole page (not just code) re-skins instantly and the choice is remembered. See [Themes](#themes).
-- **Real syntax highlighting** (Pygments, at build time — no runtime dependency or CDN) with per-block copy buttons, line numbers, and language labels.
-- **GitHub-flavored extras:** task-list checkboxes, tables, footnote-style cross-document links, heading anchors that match GitHub slugs, and LaTeX math rendering.
-- **More than Markdown.** Source files and Jupyter notebooks are rendered as highlighted code/prose automatically.
-- **Portable & self-healing.** It finds a suitable Python 3 interpreter on its own and installs the one Python dependency (`markdown`) on the fly if it is missing.
-
 ## Quick start
 
 ### No Download
@@ -48,7 +35,7 @@ That's it. By default `htmler` recursively finds every supported file under the 
 
 ## Themes
 
-Every generated page ships with **five color themes**, each with a **light and a dark** variant. Pick one from the palette button in the navbar — the entire document (background, sidebar, navbar, headings, links, tables, and code) re-skins instantly, and your choice is remembered across visits. The light/dark toggle and the theme picker compose, so any theme works in either mode.
+Every generated page ships with **five color themes**, each with a **light and a dark** variant. Pick one from the palette button in the navbar and the page re-skins instantly, and your choice is remembered across visits. The light/dark toggle and the theme picker compose, so any theme works in either mode.
 
 The default theme is **VS Code**.
 
@@ -88,8 +75,6 @@ The default theme is **VS Code**.
 Open the picker from the navbar to switch — the active theme is checkmarked and each shows a color swatch:
 
 <img src="screenshots/theme-picker.png" alt="Theme picker menu" width="520">
-
-Each theme also gives the "on this page" outline its own accent (amber on Default, teal on VS Code, green on Monokai, and so on), with dotted indent guides that mirror the Documents sidebar.
 
 ## Installation
 
