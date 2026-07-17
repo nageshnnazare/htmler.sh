@@ -18,7 +18,8 @@
 - **On-this-page table of contents** with scroll-spy that tracks your position.
 - **Responsive by design.** Works edge-to-edge on phones and iPads — drawers collapse into overlays, tables scroll, and the layout respects iOS safe areas.
 - **Light & dark themes** with an Apple-style "liquid glass" navbar; the choice is remembered across visits.
-- **Real syntax highlighting** (highlight.js) with per-block copy buttons and language labels.
+- **Five color themes** — VS Code, Monokai, One Dark, High Contrast, and the original Default — each with its own light/dark variant. Switch from a navbar picker; the whole page (not just code) re-skins instantly and the choice is remembered. See [Themes](#themes).
+- **Real syntax highlighting** (Pygments, at build time — no runtime dependency or CDN) with per-block copy buttons, line numbers, and language labels.
 - **GitHub-flavored extras:** task-list checkboxes, tables, footnote-style cross-document links, heading anchors that match GitHub slugs, and LaTeX math rendering.
 - **More than Markdown.** Source files and Jupyter notebooks are rendered as highlighted code/prose automatically.
 - **Portable & self-healing.** It finds a suitable Python 3 interpreter on its own and installs the one Python dependency (`markdown`) on the fly if it is missing.
@@ -38,6 +39,51 @@ xdg-open combine_docs.html    # Linux
 ```
 
 That's it. By default `htmler` recursively finds every supported file under the current directory and writes `combine_docs.html`.
+
+## Themes
+
+Every generated page ships with **five color themes**, each with a **light and a dark** variant. Pick one from the palette button in the navbar — the entire document (background, sidebar, navbar, headings, links, tables, and code) re-skins instantly, and your choice is remembered across visits. The light/dark toggle and the theme picker compose, so any theme works in either mode.
+
+The default theme is **VS Code**.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <b>VS Code</b> (default) — Dark+ colors on the classic editor gray.<br>
+      <img src="screenshots/theme-vscode-dark.png" alt="VS Code dark theme" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <b>VS Code — Light+</b><br>
+      <img src="screenshots/theme-vscode-light.png" alt="VS Code light theme" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>Monokai</b> — the iconic pink/green/cyan on olive.<br>
+      <img src="screenshots/theme-monokai.png" alt="Monokai theme" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <b>One Dark</b> — Atom's calm, muted palette.<br>
+      <img src="screenshots/theme-one-dark.png" alt="One Dark theme" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>High Contrast</b> — pure black, bold tokens, cyan rules.<br>
+      <img src="screenshots/theme-high-contrast.png" alt="High Contrast theme" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <b>Default</b> — htmler's original look (GitHub-style code).<br>
+      <img src="screenshots/theme-default.png" alt="Default theme" width="100%">
+    </td>
+  </tr>
+</table>
+
+Open the picker from the navbar to switch — the active theme is checkmarked and each shows a color swatch:
+
+<img src="screenshots/theme-picker.png" alt="Theme picker menu" width="520">
+
+Each theme also gives the "on this page" outline its own accent (amber on Default, teal on VS Code, green on Monokai, and so on), with dotted indent guides that mirror the Documents sidebar.
 
 ## Installation
 
@@ -59,8 +105,9 @@ ln -s "$(pwd)/htmler.sh" ~/bin/htmler.sh
 | Bash        | Ships with macOS and Linux. |
 | Python ≥ 3.6 | Auto-detected; override with `PYTHON_BIN=/path/to/python3`. |
 | `markdown`  | Installed automatically (`pip install --user`) if absent. |
+| `Pygments`  | Powers build-time syntax highlighting; installed automatically if absent. |
 
-An internet connection is only needed the first time, to fetch fonts and the highlight.js theme from a CDN (and to install `markdown` if missing).
+An internet connection is only needed the first time, to fetch web fonts from a CDN (and to install `markdown`/`Pygments` if missing). Syntax highlighting itself is baked into the page at build time, so the colors work fully offline.
 
 ## Usage
 
@@ -128,20 +175,10 @@ Source files are wrapped in fenced code blocks with the right language for highl
 | `Ctrl/⌘ + B` | Toggle the documents sidebar |
 | `Ctrl/⌘ + I` | Toggle the on-this-page table of contents |
 | `Ctrl/⌘ + Shift + L` | Switch light / dark theme |
+| `g<number>` | Go to tab number |
+| `gn` | Go to next tab |
+| `gp` | Go to previous tab |
 
-## Configuration
-
-| Variable | Purpose |
-|----------|---------|
-| `PYTHON_BIN` | Force a specific interpreter, e.g. `PYTHON_BIN=/usr/bin/python3.11 ./htmler.sh`. Must be Python ≥ 3.6. |
-
-If `python3` on your machine points at an ancient build, `htmler` automatically prefers a newer versioned interpreter (`python3.13` … `python3.6`) and verifies the version before using it.
-
-## How it works
-
-1. **Bash** parses options, resolves the file list (explicit `-f`/positional/glob, or recursive discovery), and locates a capable Python interpreter.
-2. **Python** converts each file with the `markdown` library (fenced code, tables, task lists, smart typography, GitHub-style heading anchors, and LaTeX math via MathJax), rendering notebooks and source files as needed.
-3. All documents are embedded into one HTML template along with the CSS/JS that powers the tabs, search index, table of contents, theming, and responsive layout.
 
 ## License
 

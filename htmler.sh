@@ -566,50 +566,325 @@ def add_collapsible_sections(body_html):
     return ''.join(out)
 
 
-def _github_light_defs(selector):
-    """Hand-rolled GitHub-Light token palette.
+# ── Syntax color schemes ────────────────────────────────────────────────────
+# Pygments tokenizes each code block into <span class="k">, <span class="nf">…
+# using short token classes. Rather than ship one hard-coded palette, we emit
+# CSS for a family of named schemes (VS Code, Monokai, One Dark, High Contrast,
+# GitHub) — each with a dark and a light variant. Every rule is scoped by BOTH
+# the active scheme and the light/dark mode, e.g.
+#   body[data-scheme="vscode"][data-theme="dark"] .tab-content pre code.pygcode .k
+# so the reader can switch either axis at runtime and the code re-colors with no
+# rebuild. Palettes are hand-tuned to mirror the editors they are named after.
+#
+# Each role maps to the Pygments token classes it should paint.
+_TOKEN_ROLES = [
+    ('comment',   ['c', 'ch', 'cm', 'cp', 'cpf', 'c1', 'cs', 'cd']),
+    ('keyword',   ['k', 'kc', 'kd', 'kn', 'kp', 'kr']),
+    ('type',      ['kt']),
+    ('operator',  ['o', 'ow']),
+    ('string',    ['s', 'sa', 'sb', 'sc', 'dl', 'sd', 's2', 'se', 'sh',
+                   'si', 'sx', 'sr', 's1', 'ss']),
+    ('number',    ['m', 'mb', 'mf', 'mh', 'mi', 'mo', 'il']),
+    ('function',  ['nf', 'fm']),
+    ('decorator', ['nd']),
+    ('klass',     ['nc', 'ne']),
+    ('namespace', ['nn']),
+    ('builtin',   ['nb', 'bp']),
+    ('constant',  ['no']),
+    ('variable',  ['nv', 'vc', 'vg', 'vi', 'nl']),
+    ('attribute', ['na']),
+    ('tag',       ['nt']),
+    ('error',     ['err']),
+]
 
-    Pygments ships no 'github-light' style, and its stock light styles
-    ('default', 'friendly', ...) use garish bold-green keywords / pure-blue
-    functions that clash with the clean UI and look broken next to the modern
-    'github-dark' we use for dark mode. This mirrors that dark palette's
-    structure so both themes feel like one product."""
-    palette = [
-        ('#6E7781', ['c', 'ch', 'cm', 'cp', 'cpf', 'c1', 'cs', 'cd']),          # comments
-        ('#CF222E', ['k', 'kc', 'kd', 'kn', 'kp', 'kr', 'kt', 'ow', 'err']),    # keywords
-        ('#0A3069', ['s', 'sa', 'sb', 'sc', 'dl', 'sd', 's2', 'se', 'sh',
-                     'si', 'sx', 'sr', 's1', 'ss']),                            # strings
-        ('#0550AE', ['m', 'mb', 'mf', 'mh', 'mi', 'mo', 'il',
-                     'nb', 'bp', 'na', 'o']),                                   # numbers/builtins/operators
-        ('#8250DF', ['nf', 'fm', 'nd']),                                        # functions / decorators
-        ('#953800', ['nv', 'vc', 'vg', 'vi', 'nl', 'nc', 'nn', 'no']),          # variables / classes / constants
-        ('#116329', ['nt']),                                                    # html/xml tags
-    ]
-    lines = ['%s { color: #24292F; }' % selector]
-    for color, classes in palette:
-        sel = ', '.join('%s .%s' % (selector, c) for c in classes)
-        lines.append('%s { color: %s; }' % (sel, color))
-    # Italic comments to match the github-dark treatment.
-    lines.append(', '.join('%s .%s' % (selector, c)
-                           for c in ['c', 'ch', 'cm', 'c1', 'cs']) +
+# Ordered so the picker lists them predictably. 'label' is shown in the menu.
+SYNTAX_SCHEMES = [
+    ('vscode', 'VS Code', {
+        'dark': {
+            'bg': '#1e1e1e', 'border': '#333333', 'base': '#d4d4d4',
+            'comment': '#6a9955', 'keyword': '#569cd6', 'type': '#4ec9b0',
+            'operator': '#d4d4d4', 'string': '#ce9178', 'number': '#b5cea8',
+            'function': '#dcdcaa', 'decorator': '#dcdcaa', 'klass': '#4ec9b0',
+            'namespace': '#4ec9b0', 'builtin': '#569cd6', 'constant': '#4fc1ff',
+            'variable': '#9cdcfe', 'attribute': '#9cdcfe', 'tag': '#569cd6',
+            'error': '#f44747',
+        },
+        'light': {
+            'bg': '#ffffff', 'border': '#e0e0e0', 'base': '#1f1f1f',
+            'comment': '#008000', 'keyword': '#0000ff', 'type': '#267f99',
+            'operator': '#1f1f1f', 'string': '#a31515', 'number': '#098658',
+            'function': '#795e26', 'decorator': '#795e26', 'klass': '#267f99',
+            'namespace': '#267f99', 'builtin': '#0000ff', 'constant': '#0070c1',
+            'variable': '#001080', 'attribute': '#001080', 'tag': '#800000',
+            'error': '#cd3131',
+        },
+    }),
+    ('monokai', 'Monokai', {
+        'dark': {
+            'bg': '#272822', 'border': '#3e3d32', 'base': '#f8f8f2',
+            'italic_types': True,
+            'comment': '#75715e', 'keyword': '#f92672', 'type': '#66d9ef',
+            'operator': '#f92672', 'string': '#e6db74', 'number': '#ae81ff',
+            'function': '#a6e22e', 'decorator': '#a6e22e', 'klass': '#a6e22e',
+            'namespace': '#f8f8f2', 'builtin': '#66d9ef', 'constant': '#ae81ff',
+            'variable': '#f8f8f2', 'attribute': '#a6e22e', 'tag': '#f92672',
+            'error': '#f92672',
+        },
+        'light': {
+            'bg': '#fafafa', 'border': '#e4e4da', 'base': '#2a2a2a',
+            'italic_types': True,
+            'comment': '#9a9488', 'keyword': '#ce2969', 'type': '#1a9eb5',
+            'operator': '#ce2969', 'string': '#8a6d0a', 'number': '#8a54d6',
+            'function': '#529b00', 'decorator': '#529b00', 'klass': '#529b00',
+            'namespace': '#2a2a2a', 'builtin': '#1a9eb5', 'constant': '#8a54d6',
+            'variable': '#2a2a2a', 'attribute': '#529b00', 'tag': '#ce2969',
+            'error': '#ce2969',
+        },
+    }),
+    ('onedark', 'One Dark', {
+        'dark': {
+            'bg': '#282c34', 'border': '#3b4048', 'base': '#abb2bf',
+            'comment': '#5c6370', 'keyword': '#c678dd', 'type': '#e5c07b',
+            'operator': '#56b6c2', 'string': '#98c379', 'number': '#d19a66',
+            'function': '#61afef', 'decorator': '#61afef', 'klass': '#e5c07b',
+            'namespace': '#e5c07b', 'builtin': '#56b6c2', 'constant': '#d19a66',
+            'variable': '#e06c75', 'attribute': '#d19a66', 'tag': '#e06c75',
+            'error': '#e06c75',
+        },
+        'light': {
+            'bg': '#fafafa', 'border': '#e5e5e6', 'base': '#383a42',
+            'comment': '#a0a1a7', 'keyword': '#a626a4', 'type': '#c18401',
+            'operator': '#0184bc', 'string': '#50a14f', 'number': '#986801',
+            'function': '#4078f2', 'decorator': '#4078f2', 'klass': '#c18401',
+            'namespace': '#c18401', 'builtin': '#0184bc', 'constant': '#986801',
+            'variable': '#e45649', 'attribute': '#986801', 'tag': '#e45649',
+            'error': '#e45649',
+        },
+    }),
+    ('highcontrast', 'High Contrast', {
+        'dark': {
+            'bg': '#000000', 'border': '#6fc3df', 'base': '#ffffff', 'bold': True,
+            'comment': '#7ca668', 'keyword': '#4fc1ff', 'type': '#4effe3',
+            'operator': '#ffffff', 'string': '#ffb86c', 'number': '#b5ff7a',
+            'function': '#fff95e', 'decorator': '#fff95e', 'klass': '#4effe3',
+            'namespace': '#4effe3', 'builtin': '#4fc1ff', 'constant': '#ff7edb',
+            'variable': '#ffffff', 'attribute': '#7fe7ff', 'tag': '#4fc1ff',
+            'error': '#ff5f5f',
+        },
+        'light': {
+            'bg': '#ffffff', 'border': '#0f4a6e', 'base': '#000000', 'bold': True,
+            'comment': '#3d7a2a', 'keyword': '#0000cc', 'type': '#007a6e',
+            'operator': '#000000', 'string': '#a31515', 'number': '#0a6e00',
+            'function': '#6a4e00', 'decorator': '#6a4e00', 'klass': '#007a6e',
+            'namespace': '#007a6e', 'builtin': '#0000cc', 'constant': '#9a008a',
+            'variable': '#000000', 'attribute': '#001a99', 'tag': '#7a0000',
+            'error': '#b5000a',
+        },
+    }),
+    ('default', 'Default', {
+        'dark': {
+            'bg': '#0d1117', 'border': '#21262d', 'base': '#e6edf3',
+            'comment': '#8b949e', 'keyword': '#ff7b72', 'type': '#ff7b72',
+            'operator': '#ff7b72', 'string': '#a5d6ff', 'number': '#a5d6ff',
+            'function': '#d2a8ff', 'decorator': '#d2a8ff', 'klass': '#f0883e',
+            'namespace': '#ff7b72', 'builtin': '#e6edf3', 'constant': '#79c0ff',
+            'variable': '#79c0ff', 'attribute': '#e6edf3', 'tag': '#7ee787',
+            'error': '#f85149',
+        },
+        'light': {
+            'bg': '#f6f8fa', 'border': '#d0d7de', 'base': '#24292f',
+            'comment': '#6e7781', 'keyword': '#cf222e', 'type': '#cf222e',
+            'operator': '#0550ae', 'string': '#0a3069', 'number': '#0550ae',
+            'function': '#8250df', 'decorator': '#8250df', 'klass': '#953800',
+            'namespace': '#953800', 'builtin': '#0550ae', 'constant': '#953800',
+            'variable': '#953800', 'attribute': '#0550ae', 'tag': '#116329',
+            'error': '#cf222e',
+        },
+    }),
+]
+
+DEFAULT_SCHEME = 'vscode'
+
+# id -> {'dark': {...}, 'light': {...}} for quick token-color lookups.
+SYNTAX_SCHEMES_BY_ID = {s: palettes for s, _label, palettes in SYNTAX_SCHEMES}
+
+# Whole-page UI palette per scheme+mode. These drive the CSS custom properties
+# (page/sidebar/header backgrounds, borders, text, accent), so switching scheme
+# re-skins the ENTIRE document — navbar, sidebar, tables, links — not just code.
+# Heading/link/inline-code hues are derived from the matching syntax palette
+# above so the chrome always feels like one product with its code.
+SCHEME_UI = {
+    'vscode': {
+        'dark':  {'bg': '#1e1e1e', 'surface': '#252526', 'elev': '#2d2d30',
+                  'border': '#3c3c3c', 'text': '#d4d4d4', 'text2': '#a6a6a6',
+                  'text3': '#6e7681', 'accent': '#4fa6ff', 'toc': '#4ec9b0'},
+        'light': {'bg': '#ffffff', 'surface': '#f8f8f8', 'elev': '#f0f0f0',
+                  'border': '#e0e0e0', 'text': '#1f1f1f', 'text2': '#5a5a5a',
+                  'text3': '#8a8a8a', 'accent': '#005fb8', 'toc': '#267f99'},
+    },
+    'monokai': {
+        'dark':  {'bg': '#272822', 'surface': '#2e2f28', 'elev': '#383930',
+                  'border': '#414339', 'text': '#f8f8f2', 'text2': '#c2c3b7',
+                  'text3': '#75715e', 'accent': '#66d9ef', 'toc': '#a6e22e'},
+        'light': {'bg': '#fafaf5', 'surface': '#f3f2ea', 'elev': '#eceadd',
+                  'border': '#dedcce', 'text': '#2a2a2a', 'text2': '#63625a',
+                  'text3': '#9a9488', 'accent': '#c6285a', 'toc': '#529b00'},
+    },
+    'onedark': {
+        'dark':  {'bg': '#282c34', 'surface': '#21252b', 'elev': '#2c313a',
+                  'border': '#3b4048', 'text': '#abb2bf', 'text2': '#868e9c',
+                  'text3': '#5c6370', 'accent': '#61afef', 'toc': '#e5c07b'},
+        'light': {'bg': '#fafafa', 'surface': '#f0f0f1', 'elev': '#eaeaeb',
+                  'border': '#dcdcdd', 'text': '#383a42', 'text2': '#696c77',
+                  'text3': '#a0a1a7', 'accent': '#4078f2', 'toc': '#c18401'},
+    },
+    'highcontrast': {
+        'dark':  {'bg': '#000000', 'surface': '#0d0d0d', 'elev': '#1a1a1a',
+                  'border': '#6fc3df', 'text': '#ffffff', 'text2': '#d6d6d6',
+                  'text3': '#a6a6a6', 'accent': '#4fc1ff', 'toc': '#fff95e'},
+        'light': {'bg': '#ffffff', 'surface': '#f7f7f7', 'elev': '#ededed',
+                  'border': '#0f4a6e', 'text': '#000000', 'text2': '#2a2a2a',
+                  'text3': '#555555', 'accent': '#0645ad', 'toc': '#9a008a'},
+    },
+    'default': {
+        'dark':  {'bg': '#0d1117', 'surface': '#161b22', 'elev': '#1c2128',
+                  'border': '#30363d', 'text': '#c9d1d9', 'text2': '#8b949e',
+                  'text3': '#6e7681', 'accent': '#58a6ff', 'toc': '#e3b341'},
+        'light': {'bg': '#ffffff', 'surface': '#f6f8fa', 'elev': '#eef1f4',
+                  'border': '#d0d7de', 'text': '#1f2328', 'text2': '#656d76',
+                  'text3': '#8c959f', 'accent': '#0969da', 'toc': '#9a6700'},
+    },
+}
+
+
+def _hex_rgb(h):
+    h = h.lstrip('#')
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _rgba(h, a):
+    r, g, b = _hex_rgb(h)
+    return 'rgba(%d,%d,%d,%s)' % (r, g, b, a)
+
+
+def _mix(h1, h2, t):
+    a, b = _hex_rgb(h1), _hex_rgb(h2)
+    c = tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+    return '#%02x%02x%02x' % c
+
+
+def _scheme_ui_css(scheme, mode):
+    """Emit CSS-variable overrides that re-theme the whole page for one
+    scheme+mode. Specificity (body + 2 attrs) beats the base :root defaults."""
+    ui = SCHEME_UI[scheme][mode]
+    tok = dict(SYNTAX_SCHEMES_BY_ID[scheme][mode])
+    bg, surface, elev = ui['bg'], ui['surface'], ui['elev']
+    border, text, text2, text3 = ui['border'], ui['text'], ui['text2'], ui['text3']
+    accent = ui['accent']
+    hover = _mix(accent, '#ffffff' if mode == 'dark' else '#000000', 0.28)
+    v = {
+        '--bg-body': bg,
+        '--bg-sidebar': surface,
+        '--bg-content': surface,
+        '--bg-header': _rgba(surface, 0.82),
+        '--glass-bg': 'linear-gradient(180deg, %s 0%%, %s 100%%)' % (
+            _rgba(surface, 0.85), _rgba(surface, 0.6)),
+        '--glass-border': _rgba(border, 0.7),
+        '--bg-code-block': tok['bg'],
+        '--bg-code-inline': elev,
+        '--bg-table-even': elev,
+        '--bg-table-head': elev,
+        '--bg-blockquote': elev,
+        '--bg-search-input': elev,
+        '--bg-search-overlay-inner': surface,
+        '--bg-sr-item-hover': elev,
+        '--bg-sr-item-border': border,
+        '--border-main': border,
+        '--border-header': border,
+        '--border-input': border,
+        '--border-table': border,
+        '--border-code': tok.get('border', border),
+        '--text-primary': text,
+        '--text-secondary': text2,
+        '--text-muted': text3,
+        '--text-strong': text,
+        '--text-blockquote': text2,
+        '--text-heading-h1': accent,
+        '--text-heading-h2': tok['function'],
+        '--text-heading-h3': tok['type'],
+        '--text-heading-h4': tok['klass'],
+        '--text-code-inline': tok['string'],
+        '--text-link': accent,
+        '--text-link-hover': hover,
+        '--text-tab-active': accent,
+        '--text-table-header': accent,
+        '--accent': accent,
+        '--accent-soft': _rgba(accent, 0.14),
+        '--accent-strong': _rgba(accent, 0.30),
+        '--sidebar-toggle-bg': elev,
+        '--sidebar-toggle-border': border,
+        '--sidebar-toggle-hover': _mix(elev, text, 0.10),
+        '--nav-active-bg': _rgba(accent, 0.12),
+        '--nav-doc-active-bg': accent,
+        '--nav-doc-active-fg': bg,
+        '--nav-hl-doc': accent,
+        '--nav-hl-doc-bg': _rgba(accent, 0.14),
+        '--nav-hl-toc': ui['toc'],
+        '--nav-hl-toc-bg': _rgba(ui['toc'], 0.15),
+        '--scrollbar-thumb': _mix(border, text, 0.15),
+    }
+    decls = ' '.join('%s: %s;' % (k, val) for k, val in v.items())
+    root = 'body[data-scheme="%s"][data-theme="%s"]' % (scheme, mode)
+    return '%s { %s }' % (root, decls)
+
+
+def _scheme_css(scheme, mode, pal, chrome=True):
+    """Emit token-color CSS for one scheme+mode, scoped so the active pair wins.
+
+    When `chrome` is False the code-block background/border and base text color
+    are left to the page's own theme variables — used by the 'Default' scheme so
+    it keeps htmler's original look untouched."""
+    root = 'body[data-scheme="%s"][data-theme="%s"]' % (scheme, mode)
+    pre = '%s .tab-content pre' % root
+    code = '%s .tab-content pre code' % root
+    tok = '%s .tab-content pre code.pygcode' % root
+    lines = []
+    if chrome:
+        lines.append('%s { background: %s; border-color: %s; }' % (
+            pre, pal['bg'], pal.get('border', pal['bg'])))
+        lines.append('%s { color: %s; }' % (code, pal['base']))
+    bold = ' font-weight: 700;' if pal.get('bold') else ''
+    for role, classes in _TOKEN_ROLES:
+        color = pal.get(role)
+        if not color:
+            continue
+        sel = ', '.join('%s .%s' % (tok, c) for c in classes)
+        lines.append('%s { color: %s;%s }' % (sel, color, bold))
+    # Italic comments everywhere; italic types/classes only where the scheme asks.
+    lines.append(', '.join('%s .%s' % (tok, c)
+                           for c in ['c', 'ch', 'cm', 'c1', 'cs', 'cd']) +
                  ' { font-style: italic; }')
+    if pal.get('italic_types'):
+        lines.append(', '.join('%s .%s' % (tok, c)
+                               for c in ['kt', 'nc']) + ' { font-style: italic; }')
     return '\n'.join(lines)
 
 
 def build_pygments_css():
-    """CSS token colors for both themes, scoped so the active theme wins.
-    Falls back gracefully if a preferred style name is missing."""
-    def defs(style_names, selector):
-        for name in style_names:
-            try:
-                return _PygHtmlFormatter(style=name).get_style_defs(selector)
-            except Exception:
-                continue
-        return ''
-    dark = defs(['github-dark', 'monokai', 'native'],
-                'body[data-theme="dark"] .pygcode')
-    light = _github_light_defs('body[data-theme="light"] .pygcode')
-    return dark + '\n' + light
+    """CSS for every scheme x {dark,light}: whole-page UI variables plus code
+    token colors, scoped so the active combination wins. Switching either the
+    scheme or the light/dark mode re-skins the page instantly (no rebuild)."""
+    out = []
+    for scheme, _label, palettes in SYNTAX_SCHEMES:
+        for mode in ('dark', 'light'):
+            # 'Default' keeps htmler's original chrome (page/sidebar/accent) and
+            # code-block frame; it only recolors code tokens. Every other scheme
+            # re-skins the whole page.
+            if scheme != 'default':
+                out.append(_scheme_ui_css(scheme, mode))
+            out.append(_scheme_css(scheme, mode, palettes[mode],
+                                   chrome=(scheme != 'default')))
+    return '\n'.join(out)
 
 
 # ── ```diagram blocks → nested, colored boxes (rendered at build time) ──────
@@ -1176,11 +1451,11 @@ window.MathJax = {
     --nav-doc-active-bg: var(--accent);
     --nav-doc-active-fg: #0a0f17;
     /* Sidebar highlight colors: same treatment, distinct hue per list so the
-       "Documents" (blue) and "On this page" (violet) selections read apart. */
+       "Documents" (blue) and "On this page" (amber) selections read apart. */
     --nav-hl-doc: #6cb1f0;
     --nav-hl-doc-bg: rgba(108,177,240,0.14);
-    --nav-hl-toc: #4ec9b0;
-    --nav-hl-toc-bg: rgba(78,201,176,0.15);
+    --nav-hl-toc: #e6b450;
+    --nav-hl-toc-bg: rgba(230,180,80,0.16);
     --scrollbar-thumb: #2a2e40;
 
     /* Diagram (```diagram) box accent palette */
@@ -1266,8 +1541,8 @@ window.MathJax = {
     --nav-doc-active-fg: #ffffff;
     --nav-hl-doc: #1f6fc4;
     --nav-hl-doc-bg: rgba(31,111,196,0.12);
-    --nav-hl-toc: #0d9488;
-    --nav-hl-toc-bg: rgba(13,148,136,0.12);
+    --nav-hl-toc: #b8730f;
+    --nav-hl-toc-bg: rgba(184,115,15,0.14);
     --scrollbar-thumb: #d0d4e2;
 
     /* Diagram (```diagram) box accent palette (darker for light bg contrast) */
@@ -1642,6 +1917,72 @@ body.nav-condensed .nav-doc-title {
     align-items: center;
     gap: 8px;
 }
+
+/* === Code color-scheme picker (dropdown) === */
+.scheme-picker { position: relative; display: inline-flex; }
+.scheme-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 1200;
+    min-width: 194px;
+    padding: 6px;
+    border-radius: 14px;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-6px) scale(0.97);
+    transform-origin: top right;
+    transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.32,0.72,0,1), visibility 0.2s;
+}
+.scheme-menu.open { opacity: 1; visibility: visible; transform: translateY(0) scale(1); }
+.scheme-menu-title {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--text-muted);
+    padding: 6px 10px 4px;
+}
+.scheme-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    background: transparent;
+    border-radius: 9px;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.16s ease, color 0.16s ease;
+}
+.scheme-item:hover { background: var(--nav-active-bg); color: var(--text-primary); }
+.scheme-item .swatch {
+    width: 22px;
+    height: 16px;
+    border-radius: 5px;
+    flex-shrink: 0;
+    border: 1px solid rgba(127,127,127,0.35);
+    display: inline-flex;
+    overflow: hidden;
+}
+.scheme-item .swatch i { flex: 1; height: 100%; display: block; }
+.scheme-item .scheme-name { flex: 1; }
+.scheme-item .scheme-check {
+    width: 15px; height: 15px; flex-shrink: 0; opacity: 0;
+    color: var(--accent);
+}
+.scheme-item.active { color: var(--text-primary); font-weight: 600; }
+.scheme-item.active .scheme-check { opacity: 1; }
 
 /* History-back and the prev/next buttons dim + disable when there is nowhere
    to go (start/end of the collection, or no navigation history yet). */
@@ -2056,7 +2397,25 @@ body.nav-condensed .nav-doc-title {
     background: var(--bg-code-block);
 }
 
-/* "On this page" (TOC) active heading — violet hue. */
+/* "On this page" (TOC): nested list with a dashed vertical guide per indent
+   level, mirroring the "Documents" sidebar tree. Deeper headings sit inside a
+   .toc-sub whose dashed left border draws the indent line; empty ones vanish. */
+.toc-sidebar .toc-sub {
+    list-style: none;
+    margin: 0 0 0 12px;
+    padding-left: 8px;
+    border-left: 1px dashed var(--border-main);
+}
+.toc-sidebar .toc-sub:empty { display: none; }
+/* Indentation now comes from the nested lists, so keep each row's own text
+   padding uniform (the per-level padding is only used in the flat doc list). */
+.toc-sidebar .nav-list .nav-h1,
+.toc-sidebar .nav-list .nav-h2,
+.toc-sidebar .nav-list .nav-h3,
+.toc-sidebar .nav-list .nav-h4 { padding-left: 8px; }
+
+/* "On this page" (TOC) active heading — themed accent (orange/yellow on the
+   Default theme; each other theme supplies its own matching hue). */
 #navList a.nav-active {
     color: var(--nav-hl-toc);
     background: var(--nav-hl-toc-bg);
@@ -2187,6 +2546,10 @@ body.nav-condensed .nav-doc-title {
 .doc-tool-btn.active { color: var(--accent); border-color: var(--accent); }
 .doc-tool-btn.copied { color: var(--text-heading-h4); border-color: var(--text-heading-h4); }
 .doc-tool-btn .icon { width: 15px; height: 15px; }
+/* The copy/check glyphs are solid shapes that fill their viewBox, so at 15px
+   they read visually larger than the thin-stroked "raw view" (<>) icon beside
+   them. Nudge them down a touch so all doc-tool icons look the same size. */
+.doc-tool-btn.copy-md .icon { width: 13px; height: 13px; }
 
 /* Raw Markdown view: hide the rendered content, keep meta + raw <pre>. */
 .tab-content.raw-mode > :not(.doc-meta):not(.doc-raw) { display: none !important; }
@@ -2232,6 +2595,10 @@ body.nav-condensed .nav-doc-title {
     position: relative;
     padding-left: 3.4em;
     scroll-margin-top: calc(var(--header-height) + 24px);
+    /* Blank source lines have no in-flow content (the line number is absolutely
+       positioned), so without a floor they collapse to zero height and their
+       number overlaps the next line's. Reserve exactly one line box. */
+    min-height: 1.55em;
 }
 .tab-content code.has-linenos .lnr {
     position: absolute;
@@ -2618,6 +2985,11 @@ body.nav-condensed .nav-doc-title {
        visually noisy. Line numbers are unaffected. */
     scrollbar-width: none;              /* Firefox */
     -ms-overflow-style: none;           /* old Edge */
+    /* Smoother scrolling for wide code (long .c/.cpp/.cu lines): keep a
+       horizontal swipe inside the block instead of chaining to the page (which
+       caused janky, stuttery page scroll), and give iOS momentum scrolling. */
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
 }
 .tab-content pre::-webkit-scrollbar { width: 0; height: 0; display: none; }  /* WebKit/Blink */
 
@@ -2981,7 +3353,7 @@ body.nav-condensed .nav-doc-title {
 }
 </style>
 </head>
-<body data-theme="dark" class="sidebar-collapsed toc-collapsed">
+<body data-theme="dark" data-scheme="%%DEFAULT_SCHEME%%" class="sidebar-collapsed toc-collapsed">
 
 <a class="skip-link" href="#tabPanels">Skip to content</a>
 <div class="read-progress" id="readProgress"></div>
@@ -3013,6 +3385,12 @@ body.nav-condensed .nav-doc-title {
         <button class="search-toggle" id="searchTrigger" title="Search all documents (Ctrl+K)" aria-label="Search">
           <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"></path></svg>
         </button>
+        <div class="scheme-picker">
+          <button class="theme-toggle scheme-toggle" id="schemeToggle" title="Code color theme" aria-label="Code color theme" aria-haspopup="true" aria-expanded="false">
+            <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13c.76 0 1.375-.616 1.375-1.375 0-.35-.132-.667-.35-.908a1.372 1.372 0 0 1-.35-.908c0-.76.616-1.376 1.375-1.376H11.5A3 3 0 0 0 14.5 7c0-3.038-2.91-5.5-6.5-5.5Zm-4 7a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1.75-3a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm4.5 0a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm2.25 3a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>
+          </button>
+          <div class="scheme-menu" id="schemeMenu" role="menu" aria-hidden="true"></div>
+        </div>
         <button class="theme-toggle" id="themeToggle" title="Toggle light/dark mode (Ctrl+Shift+L)" aria-label="Toggle theme"></button>
         <button class="toc-toggle" id="tocToggle" title="Toggle table of contents (Ctrl+I)" aria-label="Toggle table of contents">
           <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm3.75-1.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm2.75-.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Z"></path></svg>
@@ -3155,7 +3533,7 @@ TAB_DATA.forEach((tab, idx) => {
     tools.className = 'doc-tools';
     const copyMdBtn = document.createElement('button');
     copyMdBtn.type = 'button';
-    copyMdBtn.className = 'doc-tool-btn';
+    copyMdBtn.className = 'doc-tool-btn copy-md';
     copyMdBtn.title = 'Copy as Markdown';
     copyMdBtn.setAttribute('aria-label', 'Copy as Markdown');
     copyMdBtn.innerHTML = COPY_ICON;
@@ -3551,6 +3929,97 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         toggleTheme();
     }
+});
+
+/* ───── Code color-scheme picker ─────
+   A navbar dropdown that swaps the syntax-highlighting palette (VS Code,
+   Monokai, One Dark, High Contrast, GitHub). Each scheme ships its own dark and
+   light variant; the light/dark toggle above picks which variant is shown, so
+   the two controls compose. The choice is remembered across visits. ───── */
+/* - Nagesh N Nazare - */
+const SCHEMES = %%SCHEME_DATA%%;
+const DEFAULT_SCHEME = '%%DEFAULT_SCHEME%%';
+// A few representative token colors per scheme, used for the menu swatches.
+const SCHEME_SWATCHES = {
+    vscode:       ['#569cd6', '#ce9178', '#dcdcaa', '#6a9955'],
+    monokai:      ['#f92672', '#e6db74', '#a6e22e', '#ae81ff'],
+    onedark:      ['#c678dd', '#98c379', '#61afef', '#e5c07b'],
+    highcontrast: ['#4fc1ff', '#ffb86c', '#fff95e', '#4effe3'],
+    'default':    ['#ff7b72', '#a5d6ff', '#d2a8ff', '#7ee787']
+};
+const SCHEME_CHECK_SVG = '<svg class="scheme-check" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L1.72 8.78a.75.75 0 1 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>';
+
+const schemeToggleBtn = document.getElementById('schemeToggle');
+const schemeMenu = document.getElementById('schemeMenu');
+
+function getStoredScheme() {
+    try { return localStorage.getItem('doc-scheme'); } catch(e) { return null; }
+}
+
+function setScheme(scheme, persist) {
+    document.body.setAttribute('data-scheme', scheme);
+    if (persist) { try { localStorage.setItem('doc-scheme', scheme); } catch(e) {} }
+    schemeMenu.querySelectorAll('.scheme-item').forEach((el) => {
+        const on = el.getAttribute('data-scheme') === scheme;
+        el.classList.toggle('active', on);
+        el.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+}
+
+function buildSchemeMenu() {
+    let html = '<div class="scheme-menu-title">Code color theme</div>';
+    SCHEMES.forEach((s) => {
+        const sw = (SCHEME_SWATCHES[s.id] || []).map(
+            (c) => '<i style="background:' + c + '"></i>').join('');
+        html += '<button class="scheme-item" role="menuitemradio" aria-checked="false"'
+             +  ' data-scheme="' + s.id + '">'
+             +  '<span class="swatch">' + sw + '</span>'
+             +  '<span class="scheme-name">' + s.label + '</span>'
+             +  SCHEME_CHECK_SVG + '</button>';
+    });
+    schemeMenu.innerHTML = html;
+    schemeMenu.querySelectorAll('.scheme-item').forEach((el) => {
+        el.addEventListener('click', () => {
+            setScheme(el.getAttribute('data-scheme'), true);
+            closeSchemeMenu();
+        });
+    });
+}
+
+function openSchemeMenu() {
+    schemeMenu.classList.add('open');
+    schemeMenu.setAttribute('aria-hidden', 'false');
+    schemeToggleBtn.setAttribute('aria-expanded', 'true');
+}
+function closeSchemeMenu() {
+    schemeMenu.classList.remove('open');
+    schemeMenu.setAttribute('aria-hidden', 'true');
+    schemeToggleBtn.setAttribute('aria-expanded', 'false');
+}
+function toggleSchemeMenu() {
+    if (schemeMenu.classList.contains('open')) closeSchemeMenu();
+    else openSchemeMenu();
+}
+
+buildSchemeMenu();
+(function initScheme() {
+    const stored = getStoredScheme();
+    const valid = SCHEMES.some((s) => s.id === stored);
+    setScheme(valid ? stored : DEFAULT_SCHEME, false);
+})();
+
+schemeToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleSchemeMenu();
+});
+document.addEventListener('click', (e) => {
+    if (schemeMenu.classList.contains('open') &&
+        !schemeMenu.contains(e.target) && !schemeToggleBtn.contains(e.target)) {
+        closeSchemeMenu();
+    }
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && schemeMenu.classList.contains('open')) closeSchemeMenu();
 });
 
 /* ───── Quick document jump: press "g", type a document number, then Enter
@@ -4176,6 +4645,9 @@ function buildToc(panelIdx) {
     const panel = document.getElementById('panel-' + panelIdx);
     if (!panel) return;
     const headings = panel.querySelectorAll('h1, h2, h3, h4');
+    // Stack of open nested lists so deeper headings nest under shallower ones,
+    // giving the TOC a real tree (with per-level dashed indent guides).
+    const tocStack = [{ level: 0, container: navList }];
     headings.forEach((h, i) => {
         if (!h.id) h.id = 'autoid-' + panelIdx + '-' + i;
         // Capture the clean heading text once (before any permalink anchor is
@@ -4245,7 +4717,17 @@ function buildToc(panelIdx) {
             h.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
         li.appendChild(a);
-        navList.appendChild(li);
+        // Nest under the nearest shallower heading; each nesting level draws a
+        // dashed vertical indent guide via the .toc-sub border.
+        const lvl = parseInt(level, 10);
+        while (tocStack.length > 1 && tocStack[tocStack.length - 1].level >= lvl) {
+            tocStack.pop();
+        }
+        tocStack[tocStack.length - 1].container.appendChild(li);
+        const sub = document.createElement('ul');
+        sub.className = 'toc-sub';
+        li.appendChild(sub);
+        tocStack.push({ level: lvl, container: sub });
         currentTocHeadings.push({ el: h, link: a });
     });
     if (typeof syncBookmarkStars === 'function') syncBookmarkStars(panelIdx);
@@ -4603,12 +5085,15 @@ if (tabMatch) {
 </html>'''
 
 pygments_css = build_pygments_css()
+scheme_data_js = json.dumps([{'id': s, 'label': l} for s, l, _ in SYNTAX_SCHEMES])
 
 final_html = (HTML_TEMPLATE
               .replace('%%TAB_DATA%%', tab_data_js)
               .replace('%%DOC_TITLE%%', escaped_title)
               .replace('%%STORAGE_NS%%', storage_ns)
-              .replace('%%PYGMENTS_CSS%%', pygments_css))
+              .replace('%%PYGMENTS_CSS%%', pygments_css)
+              .replace('%%SCHEME_DATA%%', scheme_data_js)
+              .replace('%%DEFAULT_SCHEME%%', DEFAULT_SCHEME))
 
 with open(out_file, 'w') as f:
     f.write(final_html)
