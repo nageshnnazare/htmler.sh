@@ -15,6 +15,7 @@
 
 ### No Download
 ```bash
+# Run it directly from the web
 wget -qO- https://raw.githubusercontent.com/nageshnnazare/htmler/refs/heads/main/htmler.sh | bash -s -- -o index.html
 ```
 

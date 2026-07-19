@@ -569,8 +569,10 @@ def add_collapsible_sections(body_html):
 # ── Syntax color schemes ────────────────────────────────────────────────────
 # Pygments tokenizes each code block into <span class="k">, <span class="nf">…
 # using short token classes. Rather than ship one hard-coded palette, we emit
-# CSS for a family of named schemes (VS Code, Monokai, One Dark, High Contrast,
-# GitHub) — each with a dark and a light variant. Every rule is scoped by BOTH
+# CSS for a family of named schemes (VS Code, Monokai, One Dark Pro, Tokyo
+# Night, Ayu, Catppuccin, Classic, High Contrast) — each with a dark and a
+# light variant.
+# Every rule is scoped by BOTH
 # the active scheme and the light/dark mode, e.g.
 #   body[data-scheme="vscode"][data-theme="dark"] .tab-content pre code.pygcode .k
 # so the reader can switch either axis at runtime and the code re-colors with no
@@ -641,10 +643,10 @@ SYNTAX_SCHEMES = [
             'error': '#ce2969',
         },
     }),
-    ('onedark', 'One Dark', {
+    ('onedark', 'One Dark Pro', {
         'dark': {
             'bg': '#282c34', 'border': '#3b4048', 'base': '#abb2bf',
-            'comment': '#5c6370', 'keyword': '#c678dd', 'type': '#e5c07b',
+            'comment': '#7f848e', 'keyword': '#c678dd', 'type': '#e5c07b',
             'operator': '#56b6c2', 'string': '#98c379', 'number': '#d19a66',
             'function': '#61afef', 'decorator': '#61afef', 'klass': '#e5c07b',
             'namespace': '#e5c07b', 'builtin': '#56b6c2', 'constant': '#d19a66',
@@ -659,6 +661,90 @@ SYNTAX_SCHEMES = [
             'namespace': '#c18401', 'builtin': '#0184bc', 'constant': '#986801',
             'variable': '#e45649', 'attribute': '#986801', 'tag': '#e45649',
             'error': '#e45649',
+        },
+    }),
+    ('tokyonight', 'Tokyo Night', {
+        'dark': {
+            'bg': '#1a1b26', 'border': '#292e42', 'base': '#c0caf5',
+            'comment': '#565f89', 'keyword': '#bb9af7', 'type': '#2ac3de',
+            'operator': '#89ddff', 'string': '#9ece6a', 'number': '#ff9e64',
+            'function': '#7aa2f7', 'decorator': '#7aa2f7', 'klass': '#2ac3de',
+            'namespace': '#2ac3de', 'builtin': '#2ac3de', 'constant': '#ff9e64',
+            'variable': '#c0caf5', 'attribute': '#7aa2f7', 'tag': '#f7768e',
+            'error': '#f7768e',
+        },
+        'light': {
+            'bg': '#e1e2e7', 'border': '#c4c8da', 'base': '#3760bf',
+            'comment': '#848cb5', 'keyword': '#9854f1', 'type': '#007197',
+            'operator': '#006a83', 'string': '#587539', 'number': '#b15c00',
+            'function': '#2e7de9', 'decorator': '#2e7de9', 'klass': '#007197',
+            'namespace': '#007197', 'builtin': '#007197', 'constant': '#b15c00',
+            'variable': '#3760bf', 'attribute': '#2e7de9', 'tag': '#f52a65',
+            'error': '#f52a65',
+        },
+    }),
+    ('ayu', 'Ayu', {
+        'dark': {
+            'bg': '#0b0e14', 'border': '#1c2230', 'base': '#bfbdb6',
+            'comment': '#5c6773', 'keyword': '#ff8f40', 'type': '#59c2ff',
+            'operator': '#f29668', 'string': '#aad94c', 'number': '#d2a6ff',
+            'function': '#ffb454', 'decorator': '#ffb454', 'klass': '#59c2ff',
+            'namespace': '#59c2ff', 'builtin': '#59c2ff', 'constant': '#d2a6ff',
+            'variable': '#bfbdb6', 'attribute': '#ffb454', 'tag': '#39bae6',
+            'error': '#f07178',
+        },
+        'light': {
+            'bg': '#fcfcfc', 'border': '#e6e7e9', 'base': '#5c6166',
+            'comment': '#787b80', 'keyword': '#fa8d3e', 'type': '#399ee6',
+            'operator': '#ed9366', 'string': '#86b300', 'number': '#a37acc',
+            'function': '#f2ae49', 'decorator': '#f2ae49', 'klass': '#399ee6',
+            'namespace': '#399ee6', 'builtin': '#399ee6', 'constant': '#a37acc',
+            'variable': '#5c6166', 'attribute': '#f2ae49', 'tag': '#55b4d4',
+            'error': '#e65050',
+        },
+    }),
+    ('catppuccin', 'Catppuccin', {
+        'dark': {
+            'bg': '#1e1e2e', 'border': '#313244', 'base': '#cdd6f4',
+            'comment': '#6c7086', 'keyword': '#cba6f7', 'type': '#f9e2af',
+            'operator': '#94e2d5', 'string': '#a6e3a1', 'number': '#fab387',
+            'function': '#89b4fa', 'decorator': '#89b4fa', 'klass': '#f9e2af',
+            'namespace': '#f9e2af', 'builtin': '#f38ba8', 'constant': '#fab387',
+            'variable': '#cdd6f4', 'attribute': '#89b4fa', 'tag': '#89b4fa',
+            'error': '#f38ba8',
+        },
+        'light': {
+            'bg': '#eff1f5', 'border': '#ccd0da', 'base': '#4c4f69',
+            'comment': '#8c8fa1', 'keyword': '#8839ef', 'type': '#df8e1d',
+            'operator': '#179299', 'string': '#40a02b', 'number': '#fe640b',
+            'function': '#1e66f5', 'decorator': '#1e66f5', 'klass': '#df8e1d',
+            'namespace': '#df8e1d', 'builtin': '#d20f39', 'constant': '#fe640b',
+            'variable': '#4c4f69', 'attribute': '#1e66f5', 'tag': '#1e66f5',
+            'error': '#d20f39',
+        },
+    }),
+    # The original htmler palette (GitHub-flavored code tokens on htmler's own
+    # blue chrome). Kept verbatim as 'Classic' — this is the pre-theme-overhaul
+    # look, renamed from the former 'Default'. Handled specially in
+    # build_pygments_css: it keeps the page's base chrome and only recolors code.
+    ('classic', 'Classic', {
+        'dark': {
+            'bg': '#0d1117', 'border': '#21262d', 'base': '#e6edf3',
+            'comment': '#8b949e', 'keyword': '#ff7b72', 'type': '#ff7b72',
+            'operator': '#ff7b72', 'string': '#a5d6ff', 'number': '#a5d6ff',
+            'function': '#d2a8ff', 'decorator': '#d2a8ff', 'klass': '#f0883e',
+            'namespace': '#ff7b72', 'builtin': '#e6edf3', 'constant': '#79c0ff',
+            'variable': '#79c0ff', 'attribute': '#e6edf3', 'tag': '#7ee787',
+            'error': '#f85149',
+        },
+        'light': {
+            'bg': '#f6f8fa', 'border': '#d0d7de', 'base': '#24292f',
+            'comment': '#6e7781', 'keyword': '#cf222e', 'type': '#cf222e',
+            'operator': '#0550ae', 'string': '#0a3069', 'number': '#0550ae',
+            'function': '#8250df', 'decorator': '#8250df', 'klass': '#953800',
+            'namespace': '#953800', 'builtin': '#0550ae', 'constant': '#953800',
+            'variable': '#953800', 'attribute': '#0550ae', 'tag': '#116329',
+            'error': '#cf222e',
         },
     }),
     ('highcontrast', 'High Contrast', {
@@ -679,26 +765,6 @@ SYNTAX_SCHEMES = [
             'namespace': '#007a6e', 'builtin': '#0000cc', 'constant': '#9a008a',
             'variable': '#000000', 'attribute': '#001a99', 'tag': '#7a0000',
             'error': '#b5000a',
-        },
-    }),
-    ('default', 'Default', {
-        'dark': {
-            'bg': '#0d1117', 'border': '#21262d', 'base': '#e6edf3',
-            'comment': '#8b949e', 'keyword': '#ff7b72', 'type': '#ff7b72',
-            'operator': '#ff7b72', 'string': '#a5d6ff', 'number': '#a5d6ff',
-            'function': '#d2a8ff', 'decorator': '#d2a8ff', 'klass': '#f0883e',
-            'namespace': '#ff7b72', 'builtin': '#e6edf3', 'constant': '#79c0ff',
-            'variable': '#79c0ff', 'attribute': '#e6edf3', 'tag': '#7ee787',
-            'error': '#f85149',
-        },
-        'light': {
-            'bg': '#f6f8fa', 'border': '#d0d7de', 'base': '#24292f',
-            'comment': '#6e7781', 'keyword': '#cf222e', 'type': '#cf222e',
-            'operator': '#0550ae', 'string': '#0a3069', 'number': '#0550ae',
-            'function': '#8250df', 'decorator': '#8250df', 'klass': '#953800',
-            'namespace': '#953800', 'builtin': '#0550ae', 'constant': '#953800',
-            'variable': '#953800', 'attribute': '#0550ae', 'tag': '#116329',
-            'error': '#cf222e',
         },
     }),
 ]
@@ -738,6 +804,30 @@ SCHEME_UI = {
                   'border': '#dcdcdd', 'text': '#383a42', 'text2': '#696c77',
                   'text3': '#a0a1a7', 'accent': '#4078f2', 'toc': '#c18401'},
     },
+    'tokyonight': {
+        'dark':  {'bg': '#1a1b26', 'surface': '#1f2335', 'elev': '#24283b',
+                  'border': '#292e42', 'text': '#c0caf5', 'text2': '#a9b1d6',
+                  'text3': '#565f89', 'accent': '#7aa2f7', 'toc': '#bb9af7'},
+        'light': {'bg': '#e1e2e7', 'surface': '#e9e9ec', 'elev': '#dcdee3',
+                  'border': '#c4c8da', 'text': '#3760bf', 'text2': '#6172b0',
+                  'text3': '#848cb5', 'accent': '#2e7de9', 'toc': '#9854f1'},
+    },
+    'ayu': {
+        'dark':  {'bg': '#0b0e14', 'surface': '#0d1017', 'elev': '#131721',
+                  'border': '#1c2230', 'text': '#bfbdb6', 'text2': '#9299a3',
+                  'text3': '#5c6773', 'accent': '#59c2ff', 'toc': '#ffb454'},
+        'light': {'bg': '#fcfcfc', 'surface': '#f3f4f5', 'elev': '#ececed',
+                  'border': '#e0e1e3', 'text': '#5c6166', 'text2': '#787b80',
+                  'text3': '#a0a4a8', 'accent': '#399ee6', 'toc': '#f2ae49'},
+    },
+    'catppuccin': {
+        'dark':  {'bg': '#1e1e2e', 'surface': '#181825', 'elev': '#313244',
+                  'border': '#313244', 'text': '#cdd6f4', 'text2': '#a6adc8',
+                  'text3': '#6c7086', 'accent': '#89b4fa', 'toc': '#cba6f7'},
+        'light': {'bg': '#eff1f5', 'surface': '#e6e9ef', 'elev': '#dce0e8',
+                  'border': '#ccd0da', 'text': '#4c4f69', 'text2': '#6c6f85',
+                  'text3': '#8c8fa1', 'accent': '#1e66f5', 'toc': '#8839ef'},
+    },
     'highcontrast': {
         'dark':  {'bg': '#000000', 'surface': '#0d0d0d', 'elev': '#1a1a1a',
                   'border': '#6fc3df', 'text': '#ffffff', 'text2': '#d6d6d6',
@@ -745,14 +835,6 @@ SCHEME_UI = {
         'light': {'bg': '#ffffff', 'surface': '#f7f7f7', 'elev': '#ededed',
                   'border': '#0f4a6e', 'text': '#000000', 'text2': '#2a2a2a',
                   'text3': '#555555', 'accent': '#0645ad', 'toc': '#9a008a'},
-    },
-    'default': {
-        'dark':  {'bg': '#0d1117', 'surface': '#161b22', 'elev': '#1c2128',
-                  'border': '#30363d', 'text': '#c9d1d9', 'text2': '#8b949e',
-                  'text3': '#6e7681', 'accent': '#58a6ff', 'toc': '#e3b341'},
-        'light': {'bg': '#ffffff', 'surface': '#f6f8fa', 'elev': '#eef1f4',
-                  'border': '#d0d7de', 'text': '#1f2328', 'text2': '#656d76',
-                  'text3': '#8c959f', 'accent': '#0969da', 'toc': '#9a6700'},
     },
 }
 
@@ -877,13 +959,13 @@ def build_pygments_css():
     out = []
     for scheme, _label, palettes in SYNTAX_SCHEMES:
         for mode in ('dark', 'light'):
-            # 'Default' keeps htmler's original chrome (page/sidebar/accent) and
+            # 'Classic' keeps htmler's original chrome (page/sidebar/accent) and
             # code-block frame; it only recolors code tokens. Every other scheme
-            # re-skins the whole page.
-            if scheme != 'default':
+            # re-skins the whole page and ships its own code-block frame.
+            if scheme != 'classic':
                 out.append(_scheme_ui_css(scheme, mode))
             out.append(_scheme_css(scheme, mode, palettes[mode],
-                                   chrome=(scheme != 'default')))
+                                   chrome=(scheme != 'classic')))
     return '\n'.join(out)
 
 
@@ -1341,7 +1423,7 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>%%DOC_TITLE%% &mdash; Documentation</title>
 <!-- Favicon: the brand "book" glyph (same as the sidebar toggle) on an accent tile -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%236cb1f0'/%3E%3Cg%20transform='translate(8%208)'%20fill='%23ffffff'%3E%3Cpath%20d='M0%201.75A.75.75%200%200%201%20.75%201h4.253c1.227%200%202.317.59%203%201.501A3.743%203.743%200%200%201%2011.006%201h4.245a.75.75%200%200%201%20.75.75v10.5a.75.75%200%200%201-.75.75h-4.507a2.25%202.25%200%200%200-1.591.659l-.622.621a.75.75%200%200%201-1.06%200l-.622-.621A2.25%202.25%200%200%200%205.258%2013H.75a.75.75%200%200%201-.75-.75Zm7.251%2010.324.004-5.073-.002-2.253A2.25%202.25%200%200%200%205.003%202.5H1.5v9h3.757a3.75%203.75%200%200%201%201.994.574ZM8.755%204.75l-.004%207.322a3.752%203.752%200%200%201%201.992-.572H14.5v-9h-3.495a2.25%202.25%200%200%200-2.25%202.25Z'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Cdefs%3E%3ClinearGradient%20id='t'%20x1='0'%20y1='0'%20x2='32'%20y2='32'%20gradientUnits='userSpaceOnUse'%3E%3Cstop%20offset='0'%20stop-color='%231b2333'/%3E%3Cstop%20offset='1'%20stop-color='%230b0f18'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='url(%23t)'/%3E%3Cg%20transform='translate(8%208)'%20fill='%234a90ff'%3E%3Cpath%20d='M0%201.75A.75.75%200%200%201%20.75%201h4.253c1.227%200%202.317.59%203%201.501A3.743%203.743%200%200%201%2011.006%201h4.245a.75.75%200%200%201%20.75.75v10.5a.75.75%200%200%201-.75.75h-4.507a2.25%202.25%200%200%200-1.591.659l-.622.621a.75.75%200%200%201-1.06%200l-.622-.621A2.25%202.25%200%200%200%205.258%2013H.75a.75.75%200%200%201-.75-.75Zm7.251%2010.324.004-5.073-.002-2.253A2.25%202.25%200%200%200%205.003%202.5H1.5v9h3.757a3.75%203.75%200%200%201%201.994.574ZM8.755%204.75l-.004%207.322a3.752%203.752%200%200%201%201.992-.572H14.5v-9h-3.495a2.25%202.25%200%200%200-2.25%202.25Z'/%3E%3C/g%3E%3C/svg%3E">
 <!-- Typography -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1397,6 +1479,10 @@ window.MathJax = {
     --ctrl-bg: rgba(255,255,255,0.04);
     --ctrl-bg-hover: rgba(255,255,255,0.09);
     --ctrl-border: rgba(255,255,255,0.12);
+    /* Resting icon/text color inside every glass control: pure white in dark
+       mode, pure black in light mode (kept independent of the active scheme so
+       the controls always read at maximum contrast). */
+    --ctrl-fg: #ffffff;
     --ctrl-shadow: 0 4px 18px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.18);
     --ctrl-shadow-hover: 0 8px 26px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.26);
     /* Light-catching rim gradient: a single highlight on the top-left diagonal
@@ -1487,6 +1573,7 @@ window.MathJax = {
     --ctrl-bg: rgba(255,255,255,0.35);
     --ctrl-bg-hover: rgba(255,255,255,0.55);
     --ctrl-border: rgba(255,255,255,0.6);
+    --ctrl-fg: #000000;
     --ctrl-shadow: 0 4px 18px rgba(16,24,40,0.10), inset 0 1px 0 rgba(255,255,255,0.8);
     --ctrl-shadow-hover: 0 8px 26px rgba(16,24,40,0.16), inset 0 1px 0 rgba(255,255,255,0.95);
     /* Light-catching rim gradient: brightest at the top-left/bottom-right
@@ -1645,7 +1732,7 @@ body {
     font-weight: 600;
     font-size: 13px;
     letter-spacing: -0.01em;
-    color: var(--text-primary);
+    color: var(--ctrl-fg);
     background: var(--ctrl-bg);
     border: 1px solid var(--ctrl-border);
     box-shadow: var(--ctrl-shadow);
@@ -1752,7 +1839,7 @@ body.nav-condensed .nav-doc-title {
     box-shadow: var(--ctrl-shadow);
     -webkit-backdrop-filter: var(--glass-filter);
     backdrop-filter: var(--glass-filter);
-    color: var(--text-primary);
+    color: var(--ctrl-fg);
     font-family: inherit;
     font-size: 13px;
     font-weight: 600;
@@ -1808,7 +1895,7 @@ body.nav-condensed .nav-doc-title {
     box-shadow: var(--ctrl-shadow);
     -webkit-backdrop-filter: var(--glass-filter);
     backdrop-filter: var(--glass-filter);
-    color: var(--text-secondary);
+    color: var(--ctrl-fg);
     cursor: pointer;
     font-size: 16px;
     flex-shrink: 0;
@@ -1878,6 +1965,9 @@ body.nav-condensed .nav-doc-title {
 .search-toggle .icon,
 .toc-toggle .icon,
 .doc-nav .icon { width: 17px; height: 17px; }
+/* The book brand mark is filled with a fixed blue, so it keeps its color
+   regardless of the button's currentColor / theme. */
+.brand-toggle .brand-icon { width: 18px; height: 18px; }
 
 /* === Hover-to-expand button labels === */
 .btn-label {
@@ -1997,7 +2087,7 @@ body.nav-condensed .nav-doc-title {
 
 /* The brand/sidebar toggle icon carries the brand accent color. It stays a
    fixed circular branding mark and does NOT expand into a labelled pill. */
-.brand-toggle { color: var(--accent); }
+.brand-toggle { color: var(--ctrl-fg); }
 .brand-toggle:hover { color: var(--text-link-hover); padding: 0; }
 
 /* === Search widget === */
@@ -2012,7 +2102,7 @@ body.nav-condensed .nav-doc-title {
 }
 
 .search-kbd {
-    color: var(--text-muted);
+    color: var(--ctrl-fg);
     font-size: 11px;
     font-family: var(--font-mono);
     background: var(--ctrl-bg);
@@ -2230,7 +2320,15 @@ body.nav-condensed .nav-doc-title {
 .sidebar-nav {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
-    background: var(--bg-sidebar);
+    /* Frosted "glass" panel rather than a flat solid fill: a soft translucent
+       gradient (surface at the top fading toward the page tone at the bottom),
+       blended with the page behind it and blurred, so it reads as a pane of
+       glass rather than one flat color. */
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--bg-sidebar) 82%, transparent) 0%,
+        color-mix(in srgb, var(--bg-body) 60%, transparent) 100%);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    backdrop-filter: blur(16px) saturate(1.4);
     border-right: 1px solid var(--border-main);
     position: sticky;
     top: 0;
@@ -2259,7 +2357,13 @@ body.nav-condensed .nav-doc-title {
 .toc-sidebar {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
-    background: var(--bg-sidebar);
+    /* Matches .sidebar-nav: a frosted, translucent glass gradient instead of a
+       flat solid fill. */
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--bg-sidebar) 82%, transparent) 0%,
+        color-mix(in srgb, var(--bg-body) 60%, transparent) 100%);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    backdrop-filter: blur(16px) saturate(1.4);
     border-left: 1px solid var(--border-main);
     position: sticky;
     top: 0;
@@ -2531,7 +2635,7 @@ body.nav-condensed .nav-doc-title {
     width: 28px;
     height: 28px;
     padding: 0;
-    color: var(--text-secondary);
+    color: var(--ctrl-fg);
     background: var(--ctrl-bg);
     border: 1px solid var(--ctrl-border);
     box-shadow: var(--ctrl-shadow);
@@ -2635,7 +2739,7 @@ body.nav-condensed .nav-doc-title {
     font-family: var(--font-mono);
     font-size: 13px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--ctrl-fg);
     background: var(--ctrl-bg);
     border: 1px solid var(--ctrl-border);
     box-shadow: var(--ctrl-shadow);
@@ -2671,7 +2775,7 @@ body.nav-condensed .nav-doc-title {
     background: var(--ctrl-bg);
     border: 1px solid var(--ctrl-border);
     box-shadow: var(--ctrl-shadow);
-    color: var(--text-secondary);
+    color: var(--ctrl-fg);
     cursor: pointer;
     z-index: 110;
     opacity: 0;
@@ -2970,6 +3074,13 @@ body.nav-condensed .nav-doc-title {
 }
 
 /* === Fenced code blocks === */
+/* The wrapper is the positioning context for the copy button + language label
+   so they stay pinned to the visible corner while the <pre> scrolls sideways. */
+.tab-content .code-wrap {
+    position: relative;
+    margin: 16px 0;
+}
+.tab-content .code-wrap > pre { margin: 0; }
 .tab-content pre {
     background: var(--bg-code-block);
     border: 1px solid var(--border-code);
@@ -3054,10 +3165,10 @@ body.nav-condensed .nav-doc-title {
     transform: translateY(-2px);
     transition: opacity 0.15s, background 0.15s, color 0.15s, transform 0.15s;
 }
-.tab-content pre:hover .code-copy-btn { opacity: 1; transform: none; }
+.tab-content .code-wrap:hover .code-copy-btn { opacity: 1; transform: none; }
 .code-copy-btn:hover { color: var(--text-primary); background: var(--sidebar-toggle-hover); border-color: var(--accent); }
 .code-copy-btn.copied { color: var(--text-heading-h4); border-color: var(--text-heading-h4); }
-.tab-content pre:hover .code-lang-label { opacity: 0; }
+.tab-content .code-wrap:hover .code-lang-label { opacity: 0; }
 
 /* === Lists === */
 .tab-content ul, .tab-content ol {
@@ -3235,7 +3346,13 @@ body.nav-condensed .nav-doc-title {
         top: 0;
         height: 100vh;
         z-index: 150;
-        background: var(--bg-sidebar);
+        /* As an overlay drawer the document scrolls underneath, so keep the
+           frosted-glass gradient but lean more opaque for legibility. */
+        background: linear-gradient(180deg,
+            color-mix(in srgb, var(--bg-sidebar) 92%, transparent) 0%,
+            color-mix(in srgb, var(--bg-body) 82%, transparent) 100%);
+        -webkit-backdrop-filter: blur(18px) saturate(1.4);
+        backdrop-filter: blur(18px) saturate(1.4);
         box-shadow: var(--shadow-lg);
     }
     .sidebar-nav { left: 0; border-right: 1px solid var(--border-main); }
@@ -3269,12 +3386,12 @@ body.nav-condensed .nav-doc-title {
         padding-left: max(12px, env(safe-area-inset-left));
         padding-right: max(12px, env(safe-area-inset-right));
     }
-    /* Let the document picker take whatever width is left (an auto left margin
-       would otherwise swallow the free space and block flex-grow). On phones we
-       keep the original in-line order rather than the desktop right-end layout. */
-    .doc-selector { flex: 1 1 auto; margin-left: 0; order: 0; }
-    .search-widget { margin-left: 0; }
-    .doc-select { min-width: 0; max-width: none; width: 100%; }
+    /* Keep the SAME element order as the desktop navbar: brand on the left, the
+       icon-button cluster together, and the document picker pinned to the far
+       right. (Previously the picker jumped to the middle on small screens.) The
+       picker just shrinks to fit rather than growing full-width. */
+    .doc-selector { min-width: 0; }
+    .doc-select { min-width: 0; max-width: 40vw; width: auto; }
 
     .content-area {
         padding-left: max(14px, env(safe-area-inset-left));
@@ -3301,9 +3418,12 @@ body.nav-condensed .nav-doc-title {
     :root { --header-height: 52px; }
     body { font-size: 15px; }
     .doc-selector-label { display: none; }
-    /* Header is tight on phones: drop the prev/next pair (the picker still
-       switches documents). */
+    /* Header is tight on phones: drop the prev/next pair and the in-app back
+       button (the picker still switches documents) so the desktop element order
+       still fits with a usable-width picker on the right. */
     .nav-btn-group-docnav { display: none; }
+    .nav-back { display: none; }
+    .doc-select { max-width: 46vw; }
     .header-inner { gap: 6px; }
     .search-widget { gap: 6px; }
     /* Comfortable tap targets. */
@@ -3329,7 +3449,7 @@ body.nav-condensed .nav-doc-title {
 /* Devices that can't hover (touch): always show the copy button. */
 @media (hover: none) {
     .code-copy-btn { opacity: 1; transform: none; }
-    .tab-content pre:hover .code-lang-label { opacity: 1; }
+    .tab-content .code-wrap:hover .code-lang-label { opacity: 1; }
 }
 
 /* === Print === */
@@ -3362,7 +3482,7 @@ body.nav-condensed .nav-doc-title {
   <div class="header-inner" id="headerInner">
     <div class="brand">
       <button class="brand-toggle" id="sidebarToggle" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar">
-        <svg class="icon brand-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"></path></svg>
+        <svg class="icon brand-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="#4a90ff" d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"></path></svg>
       </button>
       <button class="nav-back" id="navBack" title="Go back (Alt+&larr;)" aria-label="Go back" disabled>
         <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.78 1.97a.75.75 0 0 1 0 1.06L3.81 6h6.44A4.75 4.75 0 0 1 15 10.75v2.5a.75.75 0 0 1-1.5 0v-2.5a3.25 3.25 0 0 0-3.25-3.25H3.81l2.97 2.97a.75.75 0 1 1-1.06 1.06L1.47 7.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z"></path></svg>
@@ -3782,7 +3902,7 @@ function updateDocNav(idx) {
 /* ───── Syntax highlighting ───── */
 /* - Nagesh N Nazare - */
 
-function addCopyButton(pre, block) {
+function addCopyButton(container, block) {
     const btn = document.createElement('button');
     btn.className = 'code-copy-btn';
     btn.type = 'button';
@@ -3800,7 +3920,7 @@ function addCopyButton(pre, block) {
             fallbackCopy(text, done);
         }
     });
-    pre.appendChild(btn);
+    container.appendChild(btn);
 }
 
 function fallbackCopy(text, done) {
@@ -3822,6 +3942,18 @@ function decorateCodeBlocks(root) {
         if (block.dataset.decorated === '1') return;
         const pre = block.closest('pre');
         if (!pre) return;
+        // Wrap the (horizontally scrollable) <pre> in a non-scrolling relative
+        // container and hang the copy button / language label off THAT, so they
+        // stay pinned to the visible top-right corner even when the code is
+        // scrolled sideways (an absolutely-positioned child of the <pre> itself
+        // would scroll away with the content).
+        let wrap = pre.parentElement;
+        if (!wrap || !wrap.classList.contains('code-wrap')) {
+            wrap = document.createElement('div');
+            wrap.className = 'code-wrap';
+            pre.parentNode.insertBefore(wrap, pre);
+            wrap.appendChild(pre);
+        }
         const lang = block.dataset.lang ||
             (Array.from(block.classList).find(c => c.startsWith('language-')) || '')
                 .replace('language-', '');
@@ -3829,9 +3961,9 @@ function decorateCodeBlocks(root) {
             const label = document.createElement('span');
             label.className = 'code-lang-label';
             label.textContent = lang;
-            pre.appendChild(label);
+            wrap.appendChild(label);
         }
-        addCopyButton(pre, block);
+        addCopyButton(wrap, block);
         block.dataset.decorated = '1';
     });
 }
@@ -3891,6 +4023,9 @@ function setTheme(theme, persist) {
     themeToggleBtn.title = theme === 'light'
         ? 'Switch to dark mode (Ctrl+Shift+L)'
         : 'Switch to light mode (Ctrl+Shift+L)';
+    // Swap the liquid-glass material to this mode's preset (no-op until the
+    // glass module has initialized at the end of the script).
+    if (window.LiquidGlass) window.LiquidGlass.setMode(theme);
     if (persist) {
         try { localStorage.setItem('doc-theme', theme); } catch(e) {}
     }
@@ -3944,8 +4079,11 @@ const SCHEME_SWATCHES = {
     vscode:       ['#569cd6', '#ce9178', '#dcdcaa', '#6a9955'],
     monokai:      ['#f92672', '#e6db74', '#a6e22e', '#ae81ff'],
     onedark:      ['#c678dd', '#98c379', '#61afef', '#e5c07b'],
-    highcontrast: ['#4fc1ff', '#ffb86c', '#fff95e', '#4effe3'],
-    'default':    ['#ff7b72', '#a5d6ff', '#d2a8ff', '#7ee787']
+    tokyonight:   ['#bb9af7', '#9ece6a', '#7aa2f7', '#e0af68'],
+    ayu:          ['#ff8f40', '#aad94c', '#ffb454', '#59c2ff'],
+    catppuccin:   ['#cba6f7', '#a6e3a1', '#89b4fa', '#fab387'],
+    classic:      ['#ff7b72', '#a5d6ff', '#d2a8ff', '#7ee787'],
+    highcontrast: ['#4fc1ff', '#ffb86c', '#fff95e', '#4effe3']
 };
 const SCHEME_CHECK_SVG = '<svg class="scheme-check" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L1.72 8.78a.75.75 0 1 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>';
 
@@ -4750,10 +4888,15 @@ function updateScrollSpy() {
         if (readProgress) readProgress.style.width = pct + '%';
 
         if (currentTocHeadings.length === 0) return;
-        const offset = 80;
+        // Viewport-relative position of each heading. offsetTop can't be used
+        // here: section <h2>s live inside a position:relative <summary>, so their
+        // offsetTop is measured from that summary (~0) rather than the document,
+        // which made the spy skip those sections. getBoundingClientRect().top is
+        // always relative to the viewport, so every heading is comparable.
+        const offset = 100;
         let activeEntry = currentTocHeadings[0];
         for (const entry of currentTocHeadings) {
-            if (entry.el.offsetTop <= scrollY + offset) {
+            if (entry.el.getBoundingClientRect().top <= offset) {
                 activeEntry = entry;
             } else {
                 break;
@@ -5079,6 +5222,233 @@ if (tabMatch) {
     // Fresh open (clicked link / newly opened file): always start on tab 1.
     activateTab(0);
 }
+
+/* ───── Liquid glass: real SVG-displacement refraction ─────
+   Inspired by deepika-builds/liquid-glass. Instead of a plain frosted
+   backdrop, each glass surface bends the page behind it at its rim (with a
+   faint prism fringe) via a per-element SVG displacement-map backdrop-filter,
+   while the interior stays legible. Two presets give light and dark mode a
+   distinctly different material. Refraction is Chromium-only; Safari/Firefox
+   keep the CSS frosted-blur fallback. The CSS "dressing" (tint, rim, shadow)
+   is untouched -- it is what still reads as glass. */
+/* - Nagesh N Nazare - */
+(function () {
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+
+    // Per-mode material. Dark: a stronger magnifying bulge with a visible
+    // prism fringe and a punchier saturate. Light: a gentler bend and a
+    // brighter, cleaner frost so text behind stays crisp.
+    const PRESETS = {
+        dark:  { scale: -84, chroma: 5,   border: 0.11, mapBlur: 8,  blur: 4, saturate: 1.7, fallbackBlur: 18 },
+        light: { scale: -54, chroma: 1.5, border: 0.11, mapBlur: 11, blur: 7, saturate: 1.4, fallbackBlur: 16 },
+    };
+
+    // Every glass surface in the page (navbar controls, doc picker, floating
+    // buttons, dropdown, per-doc tools).
+    const GLASS_SELECTOR = [
+        '.brand-toggle', '.nav-back', '.doc-nav', '.search-toggle',
+        '.theme-toggle', '.toc-toggle', '.doc-select', '.search-kbd',
+        '.nav-doc-title', '.scheme-menu', '.to-top', '.gjump-badge',
+        '.doc-tool-btn'
+    ].join(',');
+
+    // Chromium can run SVG filters through backdrop-filter; Safari and Firefox
+    // silently no-op, so they fall back to the CSS frosted blur.
+    const supported = (function () {
+        try {
+            const ua = navigator.userAgent;
+            const isSafari = /Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua);
+            const isFirefox = /Firefox/.test(ua);
+            if (isSafari || isFirefox) return false;
+            if (!(window.CSS && CSS.supports && CSS.supports('backdrop-filter', 'url(#lg)'))) return false;
+            const c = document.createElement('canvas');
+            c.width = c.height = 4;
+            c.getContext('2d').getImageData(0, 0, 1, 1);
+            return true;
+        } catch (e) { return false; }
+    })();
+
+    let uid = 0;
+    let defs = null;
+    function ensureDefs() {
+        if (defs) return defs;
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        // 0x0 (not display:none, which would break feImage), off in a corner.
+        svg.setAttribute('width', '0');
+        svg.setAttribute('height', '0');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.style.position = 'absolute';
+        svg.style.overflow = 'hidden';
+        defs = document.createElementNS(SVG_NS, 'defs');
+        svg.appendChild(defs);
+        document.body.appendChild(svg);
+        return defs;
+    }
+
+    // Displacement map (gradient-difference method): a red left->right ramp
+    // encodes X displacement, a blue top->bottom ramp encodes Y. A blurred,
+    // inset 50%-gray rounded rect neutralizes the interior so refraction is
+    // confined to an edge band whose curvature is set by the blur radius.
+    function makeMap(w, h, radius, border, mapBlur) {
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        const gx = ctx.createLinearGradient(0, 0, w, 0);
+        gx.addColorStop(0, 'rgb(0,0,0)');
+        gx.addColorStop(1, 'rgb(255,0,0)');
+        ctx.fillStyle = gx; ctx.fillRect(0, 0, w, h);
+        const gy = ctx.createLinearGradient(0, 0, 0, h);
+        gy.addColorStop(0, 'rgb(0,0,0)');
+        gy.addColorStop(1, 'rgb(0,0,255)');
+        ctx.globalCompositeOperation = 'difference';
+        ctx.fillStyle = gy; ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = 'source-over';
+        const inset = border * Math.min(w, h);
+        ctx.filter = 'blur(' + mapBlur + 'px)';
+        ctx.fillStyle = 'rgba(128,128,128,0.93)';
+        const iw = Math.max(w - inset * 2, 0);
+        const ih = Math.max(h - inset * 2, 0);
+        if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(inset, inset, iw, ih, Math.max(radius - inset, 2));
+            ctx.fill();
+        } else {
+            ctx.fillRect(inset, inset, iw, ih);
+        }
+        ctx.filter = 'none';
+        return canvas.toDataURL();
+    }
+
+    // Three displacement passes at staggered scales (R strongest), each
+    // isolated to one channel and recombined with screen blends -> the faint
+    // chromatic-aberration fringe at the rim.
+    function buildFilter(id, scales) {
+        const filter = document.createElementNS(SVG_NS, 'filter');
+        filter.setAttribute('id', id);
+        filter.setAttribute('x', '0'); filter.setAttribute('y', '0');
+        filter.setAttribute('width', '100%'); filter.setAttribute('height', '100%');
+        // Filters default to linearRGB, which remaps the map's neutral gray and
+        // injects a constant phantom displacement -- sRGB is load-bearing.
+        filter.setAttribute('color-interpolation-filters', 'sRGB');
+        const feImage = document.createElementNS(SVG_NS, 'feImage');
+        feImage.setAttribute('x', '0'); feImage.setAttribute('y', '0');
+        feImage.setAttribute('result', 'map');
+        feImage.setAttribute('preserveAspectRatio', 'none');
+        filter.appendChild(feImage);
+        const keep = [
+            '1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0',
+            '0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0',
+            '0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0'
+        ];
+        const channels = [];
+        for (let i = 0; i < 3; i++) {
+            const disp = document.createElementNS(SVG_NS, 'feDisplacementMap');
+            disp.setAttribute('in', 'SourceGraphic');
+            disp.setAttribute('in2', 'map');
+            disp.setAttribute('scale', scales[i]);
+            disp.setAttribute('xChannelSelector', 'R');
+            disp.setAttribute('yChannelSelector', 'B');
+            disp.setAttribute('result', 'd' + i);
+            filter.appendChild(disp);
+            const cm = document.createElementNS(SVG_NS, 'feColorMatrix');
+            cm.setAttribute('in', 'd' + i);
+            cm.setAttribute('type', 'matrix');
+            cm.setAttribute('values', keep[i]);
+            cm.setAttribute('result', 'c' + i);
+            filter.appendChild(cm);
+            channels.push('c' + i);
+        }
+        const b1 = document.createElementNS(SVG_NS, 'feBlend');
+        b1.setAttribute('in', channels[0]); b1.setAttribute('in2', channels[1]);
+        b1.setAttribute('mode', 'screen'); b1.setAttribute('result', 'c01');
+        filter.appendChild(b1);
+        const b2 = document.createElementNS(SVG_NS, 'feBlend');
+        b2.setAttribute('in', 'c01'); b2.setAttribute('in2', channels[2]);
+        b2.setAttribute('mode', 'screen');
+        filter.appendChild(b2);
+        ensureDefs().appendChild(filter);
+        return { filter: filter, feImage: feImage };
+    }
+
+    function resolveRadius(el, w, h) {
+        const raw = getComputedStyle(el).borderTopLeftRadius || '0px';
+        const v = parseFloat(raw) || 0;
+        const px = raw.trim().endsWith('%') ? (v / 100) * Math.min(w, h) : v;
+        return Math.min(px, Math.min(w, h) / 2);
+    }
+
+    const controllers = [];
+    function currentMode() {
+        return document.body.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    }
+
+    function attach(el) {
+        if (el.__lg) return el.__lg;
+        if (!supported) {
+            // Keep the CSS frosted backdrop; just tag the element for authors.
+            el.classList.add('lg-fallback');
+            const ctrl = { supported: false, refresh: function () {}, setMode: function () {} };
+            el.__lg = ctrl; controllers.push(ctrl); return ctrl;
+        }
+        const id = 'lg-' + (++uid);
+        let parts = null;
+        let mode = null;
+
+        function apply(newMode) {
+            mode = newMode;
+            const o = PRESETS[mode] || PRESETS.dark;
+            if (parts) parts.filter.remove();
+            const scales = [o.scale, o.scale + o.chroma, o.scale + 2 * o.chroma];
+            parts = buildFilter(id, scales);
+            refresh();
+            const bf = 'url(#' + id + ') blur(' + o.blur + 'px) saturate(' + o.saturate + ')';
+            el.style.backdropFilter = bf;
+            el.style.webkitBackdropFilter = bf;
+        }
+
+        function refresh() {
+            if (!parts) return;
+            const w = el.offsetWidth, h = el.offsetHeight;
+            if (!w || !h) return;
+            const o = PRESETS[mode] || PRESETS.dark;
+            try {
+                const map = makeMap(w, h, resolveRadius(el, w, h), o.border, o.mapBlur);
+                parts.feImage.setAttribute('href', map);
+                parts.feImage.setAttribute('width', w);
+                parts.feImage.setAttribute('height', h);
+            } catch (e) {}
+        }
+
+        apply(currentMode());
+        let timer = null;
+        if (window.ResizeObserver) {
+            const ro = new ResizeObserver(function () {
+                clearTimeout(timer); timer = setTimeout(refresh, 120);
+            });
+            ro.observe(el);
+        }
+        const ctrl = {
+            supported: true,
+            refresh: refresh,
+            setMode: function (m) { if (m !== mode) apply(m); }
+        };
+        el.__lg = ctrl; controllers.push(ctrl); return ctrl;
+    }
+
+    function attachAll(root) {
+        (root || document).querySelectorAll(GLASS_SELECTOR).forEach(attach);
+    }
+
+    window.LiquidGlass = {
+        supported: supported,
+        attach: attach,
+        attachAll: attachAll,
+        setMode: function (m) { controllers.forEach(function (c) { c.setMode(m); }); },
+        refreshAll: function () { controllers.forEach(function (c) { c.refresh(); }); }
+    };
+
+    attachAll(document);
+})();
 </script>
 
 </body>
