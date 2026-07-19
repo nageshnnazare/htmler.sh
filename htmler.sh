@@ -1719,10 +1719,10 @@ body {
 /* iOS-style condensed title: hidden until the page is scrolled down. */
 .nav-doc-title {
     position: absolute;
-    right: 18px;
-    left: auto;
+    left: 50%;
+    right: auto;
     top: 50%;
-    transform: translateY(calc(-50% + 8px));
+    transform: translate(-50%, calc(-50% + 8px));
     max-width: min(60vw, 520px);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1781,7 +1781,7 @@ body.nav-condensed .search-widget {
 }
 body.nav-condensed .nav-doc-title {
     opacity: 1;
-    transform: translateY(-50%);
+    transform: translate(-50%, -50%);
     pointer-events: auto;
 }
 
@@ -2770,7 +2770,8 @@ body.nav-condensed .nav-doc-title {
 .to-top {
     position: fixed;
     left: 50%;
-    top: calc(var(--header-height) + 12px);
+    bottom: max(18px, env(safe-area-inset-bottom));
+    top: auto;
     width: 40px;
     height: 40px;
     display: inline-flex;
@@ -2789,7 +2790,7 @@ body.nav-condensed .nav-doc-title {
        circle at opacity:0, so the button never appears to disappear when you
        scroll back to the top. The filter itself only lives on .show. */
     visibility: hidden;
-    transform: translateX(-50%) translateY(-12px) scale(0.9);
+    transform: translateX(-50%) translateY(12px) scale(0.9);
     pointer-events: none;
     transition: opacity 0.3s cubic-bezier(0.32,0.72,0,1), transform 0.3s cubic-bezier(0.32,0.72,0,1), visibility 0s linear 0.3s, color 0.2s, background 0.2s;
 }
@@ -3496,6 +3497,9 @@ body.nav-condensed .nav-doc-title {
     </div>
     <div class="doc-selector">
       <select class="doc-select" id="docSelect" title="Switch document"></select>
+      <button class="toc-toggle" id="tocToggle" title="Toggle table of contents (Ctrl+I)" aria-label="Toggle table of contents">
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm3.75-1.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm2.75-.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Z"></path></svg>
+      </button>
     </div>
     <div class="search-widget">
       <div class="nav-btn-group nav-btn-group-docnav">
@@ -3517,9 +3521,6 @@ body.nav-condensed .nav-doc-title {
           <div class="scheme-menu" id="schemeMenu" role="menu" aria-hidden="true"></div>
         </div>
         <button class="theme-toggle" id="themeToggle" title="Toggle light/dark mode (Ctrl+Shift+L)" aria-label="Toggle theme"></button>
-        <button class="toc-toggle" id="tocToggle" title="Toggle table of contents (Ctrl+I)" aria-label="Toggle table of contents">
-          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm3.75-1.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1 4a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm2.75-.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Z"></path></svg>
-        </button>
       </div>
     </div>
     <div class="nav-doc-title" id="navDocTitle" aria-hidden="true"></div>
