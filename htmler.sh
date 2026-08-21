@@ -116,7 +116,23 @@ HTMLER_EXCLUDE_DIRS=""
 if [ "${#EXCLUDE_DIRS[@]}" -gt 0 ]; then
     HTMLER_EXCLUDE_DIRS="$(printf '%s\n' "${EXCLUDE_DIRS[@]}")"
 fi
+
+REPO_URL=""
+if git_url=$(git config --get remote.origin.url 2>/dev/null); then
+    # Normalize SSH URLs to browser-friendly HTTPS URLs so the footer badge can
+    # link directly to the current repo when the project is a git checkout.
+    REPO_URL="$git_url"
+    if [[ "$REPO_URL" =~ ^git@github\.com: ]]; then
+        REPO_URL="https://github.com/${REPO_URL#git@github.com:}"
+    elif [[ "$REPO_URL" =~ ^git@ ]]; then
+        REPO_URL="https://${REPO_URL#git@}"
+    elif [[ "$REPO_URL" =~ ^ssh://git@ ]]; then
+        REPO_URL="https://${REPO_URL#ssh://git@}"
+    fi
+    REPO_URL="${REPO_URL%.git}"
+fi
 export HTMLER_EXCLUDE_DIRS
+export HTMLER_REPO_URL="$REPO_URL"
 
 "$PYTHON_BIN" - "$SCRIPT_DIR" "$FINAL" "$TITLE" ${MD_FILES[@]+"${MD_FILES[@]}"} << 'PYTHON_SCRIPT'
 import sys, os, glob, re, html, json, base64, mimetypes, urllib.parse
@@ -125,6 +141,7 @@ src_dir = sys.argv[1]
 out_file = sys.argv[2]
 doc_title = sys.argv[3]
 explicit_files = sys.argv[4:]  # optional, user-specified .md files (-f / positional)
+repo_url = os.environ.get('HTMLER_REPO_URL', '').strip()
 
 def _load_user_excludes():
     """Read user-specified directory excludes from the environment.
@@ -1415,6 +1432,17 @@ escaped_title = html.escape(doc_title)
 import hashlib as _hashlib
 _ns_seed = doc_title + '|' + '|'.join(t['path'] for t in tabs)
 storage_ns = 'htmler:' + _hashlib.md5(_ns_seed.encode('utf-8')).hexdigest()[:10] + ':'
+
+if repo_url:
+    repo_short = repo_url.rstrip('/').split('/')[-1]
+    repo_name = repo_url.rstrip('/').split('/')[-2:] if '/' in repo_url.rstrip('/') else [repo_short]
+    repo_label = '/'.join(repo_name)
+    left_repo_html = (
+        '<a class="page-credit-badge" href="{href}" target="_blank" rel="noopener noreferrer" '
+        'aria-label="Open repository">{label}</a>'
+    ).format(href=html.escape(repo_url, quote=True), label=html.escape(repo_label))
+else:
+    left_repo_html = ''
 
 HTML_TEMPLATE = r'''<!DOCTYPE html>
 <html lang="en">
@@ -3458,11 +3486,96 @@ body.nav-condensed .nav-doc-title {
     .tab-content .code-wrap:hover .code-lang-label { opacity: 1; }
 }
 
+/* === Footer credit === */
+.page-credit-wrap {
+    position: fixed;
+    left: 18px;
+    right: 18px;
+    bottom: 16px;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    pointer-events: none;
+}
+.page-credit-wrap > * {
+    pointer-events: auto;
+}
+.page-credit-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border-main);
+    background: color-mix(in srgb, var(--bg-sidebar) 82%, transparent);
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    box-shadow: var(--shadow-sm);
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+    pointer-events: none;
+    transition: opacity 0.28s ease, transform 0.28s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.page-credit-badge.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+.page-credit-badge:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+.page-credit {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border-main);
+    background: color-mix(in srgb, var(--bg-sidebar) 82%, transparent);
+    color: var(--text-secondary);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    box-shadow: var(--shadow-sm);
+    user-select: none;
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+    pointer-events: none;
+    transition: opacity 0.28s ease, transform 0.28s ease, border-color 0.2s ease;
+}
+.page-credit.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+.page-credit a {
+    color: var(--text-link);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+}
+.page-credit a:hover {
+    border-bottom-color: var(--text-link);
+    background: transparent;
+}
+.page-credit .heart {
+    color: #ff5f7a;
+    font-size: 12px;
+}
+
 /* === Print === */
 @media print {
     .header-bar, .sidebar-nav, .toc-sidebar, .sidebar-toggle, .to-top,
     .code-copy-btn, .heading-anchor, .doc-tools, .gjump-badge,
-    .code-lang-label { display: none !important; }
+    .code-lang-label, .page-credit { display: none !important; }
     /* Print every document, not just the active one. */
     .tab-content { display: block !important; page-break-after: always; }
     /* Never leave a section (or raw view) folded/hidden on paper. */
@@ -3579,6 +3692,13 @@ body.nav-condensed .nav-doc-title {
   </nav>
 </div>
 
+<div class="page-credit-wrap">
+  %%LEFT_REPO_HTML%%
+  <footer class="page-credit" id="pageCredit" aria-label="Generated with love from this repo">
+    <span>Built with <span class="heart" aria-label="love">❤</span> using <a href="https://github.com/nageshnnazare/htmler.sh" target="_blank" rel="noopener noreferrer">nageshnnazare/htmler.sh</a></span>
+  </footer>
+</div>
+
 <script>
 %%TAB_DATA%%
 
@@ -3586,7 +3706,21 @@ const docSelect = document.getElementById('docSelect');
 const docList = document.getElementById('docList');
 const tabPanels = document.getElementById('tabPanels');
 const navDocTitle = document.getElementById('navDocTitle');
+const pageCredit = document.getElementById('pageCredit');
+const pageCreditBadge = document.querySelector('.page-credit-badge');
 let navLastY = 0;
+
+function updatePageCredit() {
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const nearEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 24;
+    const shouldShow = nearEnd || scrollable <= 24;
+    if (pageCredit) pageCredit.classList.toggle('visible', shouldShow);
+    if (pageCreditBadge) pageCreditBadge.classList.toggle('visible', shouldShow);
+}
+window.addEventListener('scroll', updatePageCredit, { passive: true });
+window.addEventListener('resize', updatePageCredit);
+window.addEventListener('load', updatePageCredit);
+updatePageCredit();
 
 // Prettify function in JS (matching Python's prettify)
 function prettify(component) {
@@ -5469,7 +5603,8 @@ final_html = (HTML_TEMPLATE
               .replace('%%STORAGE_NS%%', storage_ns)
               .replace('%%PYGMENTS_CSS%%', pygments_css)
               .replace('%%SCHEME_DATA%%', scheme_data_js)
-              .replace('%%DEFAULT_SCHEME%%', DEFAULT_SCHEME))
+              .replace('%%DEFAULT_SCHEME%%', DEFAULT_SCHEME)
+              .replace('%%LEFT_REPO_HTML%%', left_repo_html))
 
 with open(out_file, 'w') as f:
     f.write(final_html)
