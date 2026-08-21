@@ -3695,7 +3695,7 @@ body.nav-condensed .nav-doc-title {
 <div class="page-credit-wrap">
   %%LEFT_REPO_HTML%%
   <footer class="page-credit" id="pageCredit" aria-label="Generated with love from this repo">
-    <span>Built with <span class="heart" aria-label="love">❤</span> using <a href="https://github.com/nageshnnazare/htmler.sh" target="_blank" rel="noopener noreferrer">nageshnnazare/htmler.sh</a></span>
+    <span>Stitched with <span class="heart" aria-label="love">❤</span> using <a href="https://github.com/nageshnnazare/htmler.sh" target="_blank" rel="noopener noreferrer">nageshnnazare/htmler.sh</a></span>
   </footer>
 </div>
 
