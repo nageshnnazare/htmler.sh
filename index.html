@@ -2355,11 +2355,96 @@ body[data-scheme="highcontrast"][data-theme="light"] .tab-content pre code.pygco
     .tab-content .code-wrap:hover .code-lang-label { opacity: 1; }
 }
 
+/* === Footer credit === */
+.page-credit-wrap {
+    position: fixed;
+    left: 18px;
+    right: 18px;
+    bottom: 16px;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    pointer-events: none;
+}
+.page-credit-wrap > * {
+    pointer-events: auto;
+}
+.page-credit-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border-main);
+    background: color-mix(in srgb, var(--bg-sidebar) 82%, transparent);
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    box-shadow: var(--shadow-sm);
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+    pointer-events: none;
+    transition: opacity 0.28s ease, transform 0.28s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.page-credit-badge.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+.page-credit-badge:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+.page-credit {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border-main);
+    background: color-mix(in srgb, var(--bg-sidebar) 82%, transparent);
+    color: var(--text-secondary);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    box-shadow: var(--shadow-sm);
+    user-select: none;
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+    pointer-events: none;
+    transition: opacity 0.28s ease, transform 0.28s ease, border-color 0.2s ease;
+}
+.page-credit.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+.page-credit a {
+    color: var(--text-link);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+}
+.page-credit a:hover {
+    border-bottom-color: var(--text-link);
+    background: transparent;
+}
+.page-credit .heart {
+    color: #ff5f7a;
+    font-size: 12px;
+}
+
 /* === Print === */
 @media print {
     .header-bar, .sidebar-nav, .toc-sidebar, .sidebar-toggle, .to-top,
     .code-copy-btn, .heading-anchor, .doc-tools, .gjump-badge,
-    .code-lang-label { display: none !important; }
+    .code-lang-label, .page-credit { display: none !important; }
     /* Print every document, not just the active one. */
     .tab-content { display: block !important; page-break-after: always; }
     /* Never leave a section (or raw view) folded/hidden on paper. */
@@ -2474,6 +2559,13 @@ body[data-scheme="highcontrast"][data-theme="light"] .tab-content pre code.pygco
       <ul class="nav-list" id="bookmarkList"></ul>
     </div>
   </nav>
+</div>
+
+<div class="page-credit-wrap">
+  <a class="page-credit-badge" href="https://github.com/nageshnnazare/htmler.sh" target="_blank" rel="noopener noreferrer" aria-label="Open repository">nageshnnazare/htmler.sh</a>
+  <footer class="page-credit" id="pageCredit" aria-label="Generated with love from this repo">
+    <span>Built with <span class="heart" aria-label="love">❤</span> using <a href="https://github.com/nageshnnazare/htmler.sh" target="_blank" rel="noopener noreferrer">nageshnnazare/htmler.sh</a></span>
+  </footer>
 </div>
 
 <script>
@@ -2837,7 +2929,21 @@ const docSelect = document.getElementById('docSelect');
 const docList = document.getElementById('docList');
 const tabPanels = document.getElementById('tabPanels');
 const navDocTitle = document.getElementById('navDocTitle');
+const pageCredit = document.getElementById('pageCredit');
+const pageCreditBadge = document.querySelector('.page-credit-badge');
 let navLastY = 0;
+
+function updatePageCredit() {
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const nearEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 24;
+    const shouldShow = nearEnd || scrollable <= 24;
+    if (pageCredit) pageCredit.classList.toggle('visible', shouldShow);
+    if (pageCreditBadge) pageCreditBadge.classList.toggle('visible', shouldShow);
+}
+window.addEventListener('scroll', updatePageCredit, { passive: true });
+window.addEventListener('resize', updatePageCredit);
+window.addEventListener('load', updatePageCredit);
+updatePageCredit();
 
 // Prettify function in JS (matching Python's prettify)
 function prettify(component) {
