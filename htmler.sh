@@ -422,6 +422,7 @@ md_converter = markdown.Markdown(extensions=[
     'sane_lists',
     'smarty',
     'attr_list',
+    'md_in_html',
     'toc',
 ], extension_configs={
     'toc': {'slugify': github_slugify, 'separator': '-'},
@@ -1161,7 +1162,7 @@ def wrap_code_file_as_markdown(filepath):
 
 
 def wrap_ipynb_file_as_markdown(filepath):
-    """Read a Jupyter Notebook (.ipynb) file and wrap its cells as markdown/code blocks."""
+    """Read a Jupyter Notebook (.ipynb) file and wrap its cells as markdown/code blocks with outputs."""
     try:
         with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
             nb = json.load(f)
@@ -1184,6 +1185,39 @@ def wrap_ipynb_file_as_markdown(filepath):
                 exec_cnt = cell.get('execution_count')
                 exec_label = f" [{exec_cnt}]" if exec_cnt is not None else ""
                 md_cells.append(f"###### [In{exec_label}]:\n```python\n{source}\n```\n")
+                
+                # Extract and format outputs
+                outputs = cell.get('outputs', [])
+                for out in outputs:
+                    out_type = out.get('output_type')
+                    if out_type == 'stream':
+                        text = "".join(out.get('text', []))
+                        if text:
+                            md_cells.append(f"###### [Out{exec_label}]:\n```\n{text}\n```\n")
+                    elif out_type in ('execute_result', 'display_data'):
+                        data = out.get('data', {})
+                        if 'image/png' in data:
+                            img_data = data['image/png']
+                            img_str = "".join(img_data) if isinstance(img_data, list) else img_data
+                            md_cells.append(f"\n<img src=\"data:image/png;base64,{img_str.strip()}\" style=\"max-width:100%; height:auto;\" />\n")
+                        elif 'image/jpeg' in data:
+                            img_data = data['image/jpeg']
+                            img_str = "".join(img_data) if isinstance(img_data, list) else img_data
+                            md_cells.append(f"\n<img src=\"data:image/jpeg;base64,{img_str.strip()}\" style=\"max-width:100%; height:auto;\" />\n")
+                        elif 'text/html' in data:
+                            html_text = "".join(data['text/html']) if isinstance(data['text/html'], list) else data['text/html']
+                            md_cells.append(f"\n{html_text}\n")
+                        elif 'text/markdown' in data:
+                            md_text = "".join(data['text/markdown']) if isinstance(data['text/markdown'], list) else data['text/markdown']
+                            md_cells.append(f"\n{md_text}\n")
+                        elif 'text/plain' in data:
+                            text = "".join(data['text/plain']) if isinstance(data['text/plain'], list) else data['text/plain']
+                            if text:
+                                md_cells.append(f"###### [Out{exec_label}]:\n```\n{text}\n```\n")
+                    elif out_type == 'error':
+                        traceback = "\n".join(out.get('traceback', []))
+                        traceback_clean = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', traceback)
+                        md_cells.append(f"###### [Error]:\n```\n{traceback_clean}\n```\n")
         return "\n".join(md_cells)
     except Exception as e:
         return f"# {os.path.basename(filepath)}\n\nError parsing notebook: {e}\n"
@@ -1226,6 +1260,34 @@ def fix_cuddled_lists(text):
                     
         new_lines.append(line)
         
+    return '\n'.join(new_lines)
+
+
+def enable_md_in_html(text):
+    """Add markdown="1" to raw HTML block opening tags (e.g. <div ...>, <center ...>, <p ...>)
+    so that python-markdown's md_in_html extension parses markdown (images, badges, bold, etc.) inside them."""
+    lines = text.splitlines()
+    new_lines = []
+    in_code_block = False
+    html_block_re = re.compile(r'(<)(div|center|p|section|article|header|footer|aside)\b([^>]*)(>)', re.IGNORECASE)
+    
+    for line in lines:
+        if line.strip().startswith('```'):
+            in_code_block = not in_code_block
+            new_lines.append(line)
+            continue
+        if in_code_block:
+            new_lines.append(line)
+            continue
+        
+        def _repl(m):
+            prefix, tag, attrs, suffix = m.groups()
+            if 'markdown=' not in attrs.lower():
+                return f"{prefix}{tag}{attrs} markdown=\"1\"{suffix}"
+            return m.group(0)
+            
+        line = html_block_re.sub(_repl, line)
+        new_lines.append(line)
     return '\n'.join(new_lines)
 
 
@@ -1366,6 +1428,7 @@ for order, md_path in enumerate(md_files, start=1):
 
     md_text, math_replacements = protect_latex_delimiters(md_text)
     md_text = fix_cuddled_lists(md_text)
+    md_text = enable_md_in_html(md_text)
     md_converter.reset()
     body_html = md_converter.convert(md_text)
     body_html = restore_latex_delimiters(body_html, math_replacements)
