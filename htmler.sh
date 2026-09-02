@@ -372,9 +372,9 @@ def protect_latex_delimiters(text):
     buffer = []
 
     for line in lines:
-        stripped = line.lstrip()
-        if stripped.startswith('```') or stripped.startswith('~~~'):
-            marker = stripped[:3]
+        clean_line = re.sub(r'^(?:\s*>\s*)+', '', line.rstrip('\r\n')).strip()
+        if clean_line.startswith('```') or clean_line.startswith('~~~'):
+            marker = clean_line[:3]
             if not in_fence:
                 if buffer:
                     out.append(_protect_latex_snippet(''.join(buffer), replacements))
@@ -1223,6 +1223,74 @@ def wrap_ipynb_file_as_markdown(filepath):
         return f"# {os.path.basename(filepath)}\n\nError parsing notebook: {e}\n"
 
 
+_BQ_OPEN_FENCE_RE = re.compile(
+    r'^(?P<prefix>(?:\s*>\s*)+)(?P<fence>`{3,}|~{3,})\s*(?P<lang>[\w#.+-]*)?\s*$'
+)
+
+
+def stash_blockquote_code_blocks(text):
+    """Extract fenced code blocks inside blockquotes (> ```lang ... > ```) and replace
+    them with placeholder tokens inside the blockquote structure so python-markdown
+    parses the surrounding blockquote text cleanly without breaking on inner code."""
+    lines = text.splitlines(keepends=True)
+    out_lines = []
+    stashed = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+        m = _BQ_OPEN_FENCE_RE.match(line)
+        if m:
+            prefix = m.group('prefix')
+            fence = m.group('fence')
+            fence_char = fence[0]
+            fence_len = len(fence)
+            lang = m.group('lang') or ''
+
+            code_lines = []
+            i += 1
+
+            while i < len(lines):
+                cur_line = lines[i]
+                clean_cur = cur_line.rstrip('\r\n')
+
+                # Check if this line is closing fence
+                without_quotes = re.sub(r'^(?:\s*>\s*)+', '', clean_cur).strip()
+                if without_quotes.startswith(fence_char * fence_len) and set(without_quotes) <= {fence_char}:
+                    i += 1
+                    break
+
+                # Strip one layer of quote prefix matching the blockquote
+                content_line = cur_line
+                if content_line.startswith(prefix):
+                    content_line = content_line[len(prefix):]
+                elif content_line.startswith(prefix.strip()):
+                    content_line = content_line[len(prefix.strip()):]
+                elif re.match(r'^(?:\s*>\s*)+', content_line):
+                    content_line = re.sub(r'^(?:\s*>\s*)+', '', content_line, count=1)
+
+                code_lines.append(content_line)
+                i += 1
+
+            code_content = ''.join(code_lines)
+            if code_content.endswith('\n'):
+                code_content = code_content[:-1]
+
+            escaped_code = html.escape(code_content)
+            code_attr = f' class="language-{lang}"' if lang else ''
+            code_html = f'<pre><code{code_attr}>{escaped_code}</code></pre>'
+
+            token = f'HTMLER_BQCODE_{len(stashed)}_END'
+            stashed.append((token, code_html))
+
+            out_lines.append(f'{prefix}\n{prefix}{token}\n{prefix}\n')
+        else:
+            out_lines.append(line)
+            i += 1
+
+    return ''.join(out_lines), stashed
+
+
 def fix_cuddled_lists(text):
     """Ensure cuddled lists (lists immediately following a paragraph without a blank line)
     are separated by a blank line so that python-markdown renders them as lists."""
@@ -1236,7 +1304,8 @@ def fix_cuddled_lists(text):
     
     for i, line in enumerate(lines):
         # Track if we are inside a fenced code block to avoid modifying code
-        if line.strip().startswith('```'):
+        clean_line = re.sub(r'^(?:\s*>\s*)+', '', line.strip())
+        if clean_line.startswith('```'):
             in_code_block = not in_code_block
             new_lines.append(line)
             continue
@@ -1272,7 +1341,8 @@ def enable_md_in_html(text):
     html_block_re = re.compile(r'(<)(div|center|p|section|article|header|footer|aside)\b([^>]*)(>)', re.IGNORECASE)
     
     for line in lines:
-        if line.strip().startswith('```'):
+        clean_line = re.sub(r'^(?:\s*>\s*)+', '', line.strip())
+        if clean_line.startswith('```'):
             in_code_block = not in_code_block
             new_lines.append(line)
             continue
@@ -1426,11 +1496,15 @@ for order, md_path in enumerate(md_files, start=1):
     md_text = DIAGRAM_COMMENT_RE.sub(_stash_diagram, md_text)
     md_text = DIAGRAM_FENCE_RE.sub(_stash_diagram, md_text)
 
+    md_text, bq_code_stashes = stash_blockquote_code_blocks(md_text)
     md_text, math_replacements = protect_latex_delimiters(md_text)
     md_text = fix_cuddled_lists(md_text)
     md_text = enable_md_in_html(md_text)
     md_converter.reset()
     body_html = md_converter.convert(md_text)
+    for tok, code_html in bq_code_stashes:
+        body_html = body_html.replace(f'<p>{tok}</p>', code_html)
+        body_html = body_html.replace(tok, code_html)
     body_html = restore_latex_delimiters(body_html, math_replacements)
     body_html = render_task_lists(body_html)
     body_html = render_callouts(body_html)
@@ -3418,6 +3492,10 @@ body.nav-condensed .nav-doc-title {
 }
 .tab-content blockquote p:first-child { margin-top: 0; }
 .tab-content blockquote p:last-child { margin-bottom: 0; }
+.tab-content blockquote > .code-wrap:first-child,
+.tab-content blockquote > pre:first-child { margin-top: 0; }
+.tab-content blockquote > .code-wrap:last-child,
+.tab-content blockquote > pre:last-child { margin-bottom: 0; }
 
 /* === Responsive === */
 
