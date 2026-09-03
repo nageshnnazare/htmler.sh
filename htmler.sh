@@ -444,8 +444,7 @@ def render_task_lists(body):
 # GitHub-style admonitions: "> [!NOTE]" blockquotes -> styled callout boxes.
 # Done entirely at build time so there is zero runtime/JS cost.
 CALLOUT_RE = re.compile(
-    r'<blockquote>\s*<p>\s*\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*'
-    r'(?:<br\s*/?>)?\s*(.*?)</blockquote>',
+    r'<blockquote>\s*<p>\s*\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*(?:</p>|<br\s*/?>)?\s*(.*?)</blockquote>',
     re.DOTALL | re.IGNORECASE)
 
 CALLOUT_TITLES = {
@@ -458,13 +457,14 @@ def render_callouts(body):
     """Convert `> [!NOTE]`-style blockquotes into semantic callout panels."""
     def repl(m):
         kind = m.group(1).lower()
-        rest = m.group(2)
+        rest = m.group(2).strip()
         title = CALLOUT_TITLES.get(kind, kind.title())
-        inner = '<p>' + rest if not rest.lstrip().startswith('</p>') else rest
+        if rest and not re.match(r'^<(p|ul|ol|div|h[1-6]|pre|table|blockquote)\b', rest, re.I):
+            rest = '<p>' + rest
         return ('<div class="callout callout-{k}">'
                 '<div class="callout-title">{t}</div>'
                 '<div class="callout-body">{b}</div></div>').format(
-                    k=kind, t=title, b=inner)
+                    k=kind, t=title, b=rest)
     return CALLOUT_RE.sub(repl, body)
 
 
@@ -1293,17 +1293,16 @@ def stash_blockquote_code_blocks(text):
 
 def fix_cuddled_lists(text):
     """Ensure cuddled lists (lists immediately following a paragraph without a blank line)
-    are separated by a blank line so that python-markdown renders them as lists."""
+    are separated by a blank line so that python-markdown renders them as lists.
+    Supports list items both plain and inside blockquotes (> - item, >> 1. item, etc.)."""
     lines = text.splitlines()
     new_lines = []
     in_code_block = False
     
-    # Regex to match the start of a list item (ordered or unordered)
-    # e.g., 1. Item, - Item, * Item, + Item
-    list_item_re = re.compile(r'^\s*(\d+\.|[\*\-+])\s+')
+    # Regex to match list items: optional blockquote prefixes (>), spaces, then marker (- | * | + | 1.) and space
+    list_item_re = re.compile(r'^(?:\s*>\s*)*\s*(\d+\.|[\*\-+])\s+')
     
     for i, line in enumerate(lines):
-        # Track if we are inside a fenced code block to avoid modifying code
         clean_line = re.sub(r'^(?:\s*>\s*)+', '', line.strip())
         if clean_line.startswith('```'):
             in_code_block = not in_code_block
@@ -1317,15 +1316,17 @@ def fix_cuddled_lists(text):
         if list_item_re.match(line):
             if i > 0:
                 prev_line = lines[i-1]
-                prev_stripped = prev_line.strip()
-                # If the previous line has text, is not a list item itself,
-                # and is not a header, blockquote, or horizontal rule, insert a blank line.
-                if (prev_stripped and 
-                    not list_item_re.match(prev_line) and 
-                    not prev_stripped.startswith('#') and 
-                    not prev_stripped.startswith('>') and 
-                    not (prev_stripped.startswith('---') or prev_stripped.startswith('***') or prev_stripped.startswith('___'))):
-                    new_lines.append('')
+                prev_clean = re.sub(r'^(?:\s*>\s*)+', '', prev_line).strip()
+                prev_is_list = bool(list_item_re.match(prev_line))
+                # Insert a blank line if the previous line has text and is not:
+                # a list item, heading, horizontal rule, or callout tag line like [!NOTE]
+                if (prev_clean and 
+                    not prev_is_list and 
+                    not prev_clean.startswith('#') and 
+                    not (prev_clean.startswith('---') or prev_clean.startswith('***') or prev_clean.startswith('___'))):
+                    prefix_match = re.match(r'^((?:\s*>\s*)+)', line)
+                    bq_prefix = prefix_match.group(1) if prefix_match else ''
+                    new_lines.append(bq_prefix.rstrip())
                     
         new_lines.append(line)
         
