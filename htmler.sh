@@ -3613,6 +3613,8 @@ body.nav-condensed .nav-doc-title {
     /* No hover on touch, so keep the copy button visible. */
     .code-copy-btn { opacity: 1; transform: none; }
     .nav-doc-title { max-width: 64vw; font-size: 13px; padding: 6px 14px; }
+    /* Prevent the back-to-top button from overlapping the page credit footer on mobile */
+    .to-top { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 54px); }
 }
 
 /* ---- Very small phones ---- */
