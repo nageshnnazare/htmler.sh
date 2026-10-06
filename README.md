@@ -36,7 +36,7 @@ That's it. By default `htmler` recursively finds every supported file under the 
 
 ## Themes
 
-Every generated page ships with **five color themes**, each with a **light and a dark** variant. Pick one from the palette button in the navbar and the page re-skins instantly, and your choice is remembered across visits. The light/dark toggle and the theme picker compose, so any theme works in either mode.
+Every generated page ships with several color themes, each with a **light and a dark** variant. Pick one from the palette button in the navbar and the page re-skins instantly, and your choice is remembered across visits. The light/dark toggle and the theme picker compose, so any theme works in either mode.
 
 The default theme is **VS Code**.
 
@@ -72,6 +72,19 @@ The default theme is **VS Code**.
     </td>
   </tr>
 </table>
+
+**Paper** is the warm editorial theme: cream paper (`#f4f1ea`) and Palatino in the light, with code on a cream card, and ink (`#1c1915`) in the dark, with code on a darker ink block. Prose can be tinted in the same colors as the strategy notes:
+
+| Write this | Color |
+|---|---|
+| `{gc}graph_cut{/gc}` | rust |
+| `{cc}cell_count{/cc}` | navy |
+| `{st}static{/st}` | olive |
+| `{dy}dynamic{/dy}` | purple |
+| `{fail}failed{/fail}` | rose, bold |
+| `{pass}passed{/pass}` | olive, bold |
+
+Aliases: `rust` / `orange`, `blue` / `navy`, `green` / `olive`, `purple`, `bad` / `red`, and `ok`. The hues follow the light/dark toggle on every theme. Marks in fenced blocks and inline code stay as written.
 
 Open the picker from the navbar to switch — the active theme is checkmarked and each shows a color swatch:
 
@@ -156,8 +169,23 @@ htmler.sh [-o output.html] [-x dir ...] [-f file ...] [file ...]
 | CUDA      | `.cu` |
 | Python    | `.py` |
 | Jupyter   | `.ipynb` |
+| Verilog   | `.v`, `.vh` |
+| SystemVerilog | `.sv`, `.svh` |
+| LLVM IR   | `.ll` |
 
 Source files are wrapped in fenced code blocks with the right language for highlighting; notebooks have their Markdown and code cells rendered in order.
+
+## Fonts
+
+The **Aa** button in the navbar opens the reading font. At the top of that menu, **−** and **+** change the size from 80% to 160% in steps of 10%, and the percent between them resets to 100%. **Theme default** leaves the face to the color theme (Paper stays Palatino; the others stay Inter, with JetBrains Mono for code). The face and the size are both remembered.
+
+| | Faces |
+|---|---|
+| Sans | Inter, Google Sans, IBM Plex Sans, System |
+| Serif | Iowan Old Style, Palatino, Source Serif, Georgia |
+| Mono | JetBrains Mono, Fira Code, IBM Plex Mono, Source Code Pro |
+
+A mono choice is used for prose and for code. A sans or serif choice keeps a matching monospace face on code blocks.
 
 ## Keyboard shortcuts
 

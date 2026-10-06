@@ -3,14 +3,20 @@
 #
 # Uses Python markdown library for proper semantic HTML conversion,
 # styled to match the nvim vscode dark theme + markview.nvim rendering.
-# Features: syntax-highlighted code blocks, light/dark mode toggle, custom output name.
-# Supports: Markdown (.md), C/C++/CUDA (.c, .cpp, .cu, .h, .hpp) files.
+# Features: syntax-highlighted code blocks, light/dark mode toggle,
+#           color themes, reader font and size, custom output name.
+# Supports: Markdown (.md), C/C++/CUDA (.c, .cc, .cxx, .cpp, .cu, .h, .hpp),
+#           Python (.py), Jupyter (.ipynb),
+#           Verilog / SystemVerilog (.v, .vh, .sv, .svh), LLVM IR (.ll).
 # Code files are automatically wrapped in markdown code blocks with syntax highlighting.
 # v6: Added support for C/C++/CUDA code files.
+# v7: Verilog, SystemVerilog, LLVM IR, a reader font picker
+#     (Inter, Palatino, JetBrains Mono, Fira Code, and others),
+#     and a font-size stepper.
 #
-# Usage: ./htmler.sh [-o output.html] [-x dir ...] [-f file.md|file.c|file.cpp ...] [file ...]
+# Usage: ./htmler.sh [-o output.html] [-x dir ...] [-f file ...] [file ...]
 #   -o output.html   Name of the generated HTML (default: combine_docs.html)
-#   -f file          Include a specific file (.md, .c, .cpp, .cu, .h, .hpp).
+#   -f file          Include a specific file (.md, .c, .cpp, .py, .v, .sv, .ll, …).
 #                    Repeatable. May also be given as positional arguments.
 #                    When any files are specified, ONLY those files are included,
 #                    in the order given.
@@ -18,7 +24,7 @@
 #                    Matches a directory name (e.g. figures) or a path relative
 #                    to the current directory (e.g. docs/figures). Ignored when
 #                    explicit files are given.
-#   (no files)       Default: recursively discover every .md and code file under cwd.
+#   (no files)       Default: recursively discover every supported file under cwd.
 # Output: combine_docs.html (default) or specified file in the current directory
 # Author: Nagesh N Nazare
 
@@ -29,7 +35,7 @@ MD_FILES=()
 EXCLUDE_DIRS=()
 
 usage() {
-    echo "Usage: $0 [-o output.html] [-x dir ...] [-f file.md|file.c|file.cpp ...] [file ...]" >&2
+    echo "Usage: $0 [-o output.html] [-x dir ...] [-f file.md|file.c|file.v|file.ll ...] [file ...]" >&2
 }
 
 while getopts "o:f:x:h" opt; do
@@ -140,8 +146,44 @@ import sys, os, glob, re, html, json, base64, mimetypes, urllib.parse
 src_dir = sys.argv[1]
 out_file = sys.argv[2]
 doc_title = sys.argv[3]
-explicit_files = sys.argv[4:]  # optional, user-specified .md files (-f / positional)
+explicit_files = sys.argv[4:]  # optional, user-specified files (-f / positional)
 repo_url = os.environ.get('HTMLER_REPO_URL', '').strip()
+
+# Flat source files are wrapped in one fenced block. The value is the
+# Pygments / Markdown language name. Longer suffixes are matched first so
+# ".svh" is SystemVerilog and not a ".v" or ".h" file.
+CODE_LANG_BY_EXT = {
+    '.c': 'c',
+    '.cc': 'cpp',
+    '.cxx': 'cpp',
+    '.cpp': 'cpp',
+    '.c++': 'cpp',
+    '.h': 'c',
+    '.hpp': 'cpp',
+    '.cu': 'cuda',
+    '.py': 'python',
+    '.v': 'verilog',
+    '.vh': 'verilog',
+    '.sv': 'systemverilog',
+    '.svh': 'systemverilog',
+    '.ll': 'llvm',
+}
+_CODE_EXTS_BY_LEN = sorted(CODE_LANG_BY_EXT, key=len, reverse=True)
+
+
+def code_lang_for(path):
+    """Pygments language for a source file, or None if it is not one."""
+    name = path.lower()
+    for ext in _CODE_EXTS_BY_LEN:
+        if name.endswith(ext):
+            return CODE_LANG_BY_EXT[ext]
+    return None
+
+
+def is_supported_file(path):
+    """Markdown, notebooks, and the source types listed in CODE_LANG_BY_EXT."""
+    name = path.lower()
+    return name.endswith('.md') or name.endswith('.ipynb') or code_lang_for(path) is not None
 
 def _load_user_excludes():
     """Read user-specified directory excludes from the environment.
@@ -181,8 +223,7 @@ def collect_md_files(root):
             kept.append(d)
         dirnames[:] = kept
         for fn in filenames:
-            fn_lower = fn.lower()
-            if fn_lower.endswith('.md') or fn_lower.endswith(('.c', '.cpp', '.cu', '.h', '.hpp', '.py', '.ipynb')):
+            if is_supported_file(fn):
                 found.append(os.path.join(dirpath, fn))
     return found
 
@@ -203,7 +244,7 @@ def resolve_explicit(paths):
     Each argument may be a plain path or a glob pattern (e.g. dir1/*.md,
     docs/**/*.md). Patterns are matched relative to src_dir when not absolute.
     Order between arguments is preserved; matches within one glob are sorted.
-    Supports .md files and code files (.c, .cpp, .cu, .h, .hpp, .py, .ipynb).
+    Supports Markdown, notebooks, C/C++/CUDA, Python, Verilog, and LLVM IR.
     """
     import glob as _glob
     resolved = []
@@ -219,9 +260,7 @@ def resolve_explicit(paths):
             matches = [base]
         for cand in matches:
             cand = os.path.normpath(cand)
-            cand_lower = cand.lower()
-            # Accept .md files or code files
-            if not (cand_lower.endswith('.md') or cand_lower.endswith(('.c', '.cpp', '.cu', '.h', '.hpp', '.py', '.ipynb'))):
+            if not is_supported_file(cand):
                 print("[!] Skipping non-supported file:", cand, file=sys.stderr)
                 continue
             if not os.path.isfile(cand):
@@ -239,13 +278,13 @@ if explicit_files:
     # Only include the files the user asked for, in the given order.
     md_files = resolve_explicit(explicit_files)
     if not md_files:
-        print("No valid .md files among the specified arguments.", file=sys.stderr)
+        print("No valid files among the specified arguments.", file=sys.stderr)
         sys.exit(1)
 else:
-    # Default: recursively discover every .md file (README first).
+    # Default: recursively discover every supported file (README first).
     md_files = sorted(collect_md_files(src_dir), key=order_key)
     if not md_files:
-        print("No .md files found under", src_dir, file=sys.stderr)
+        print("No supported files found under", src_dir, file=sys.stderr)
         sys.exit(1)
 
 import subprocess, importlib
@@ -403,6 +442,79 @@ def restore_latex_delimiters(body_html, replacements):
     for token, original in replacements:
         body_html = body_html.replace(token, original)
     return body_html
+
+
+# Colored prose marks, same hues as the strategy-comparison notes:
+#   {gc}graph_cut{/gc}  {cc}cell_count{/cc}  {st}static{/st}  {dy}dynamic{/dy}
+#   {fail}failed{/fail}  {pass}passed{/pass}
+# Friendly aliases (rust, blue, green, purple, bad, ok, …) map to those classes.
+# Applied to Markdown source, outside fenced and inline code, before conversion.
+_INK_ALIASES = {
+    'gc': 'gc', 'rust': 'gc', 'orange': 'gc',
+    'cc': 'cc', 'blue': 'cc', 'navy': 'cc',
+    'st': 'st', 'green': 'st', 'olive': 'st',
+    'dy': 'dy', 'purple': 'dy', 'violet': 'dy',
+    'fail': 'fail', 'bad': 'fail', 'red': 'fail',
+    'pass': 'pass', 'ok': 'pass',
+}
+_INK_MARK_RE = re.compile(
+    r'\{(' + '|'.join(sorted(_INK_ALIASES, key=len, reverse=True)) + r')\}'
+    r'([^{}\n]*)'
+    r'\{/\1\}',
+    re.IGNORECASE)
+
+
+def _colorize_ink_snippet(text):
+    """Turn {gc}…{/gc} marks into spans, leaving inline `code` untouched."""
+    def repl(m):
+        cls = _INK_ALIASES.get(m.group(1).lower())
+        inner = m.group(2)
+        if not cls or inner == '':
+            return m.group(0)
+        return '<span class="%s">%s</span>' % (cls, html.escape(inner, quote=False))
+
+    parts = re.split(r'(`+[^`]*`+)', text)
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1 and part.startswith('`'):
+            out.append(part)
+        else:
+            out.append(_INK_MARK_RE.sub(repl, part))
+    return ''.join(out)
+
+
+def colorize_ink(text):
+    """Paint colored prose marks. Fenced code blocks are copied through as-is."""
+    lines = text.splitlines(keepends=True)
+    out = []
+    in_fence = False
+    fence_marker = None
+    buffer = []
+
+    def flush():
+        if buffer:
+            out.append(_colorize_ink_snippet(''.join(buffer)))
+            del buffer[:]
+
+    for line in lines:
+        clean_line = re.sub(r'^(?:\s*>\s*)+', '', line.rstrip('\r\n')).strip()
+        if clean_line.startswith('```') or clean_line.startswith('~~~'):
+            marker = clean_line[:3]
+            if not in_fence:
+                flush()
+                in_fence = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                in_fence = False
+                fence_marker = None
+            out.append(line)
+            continue
+        if in_fence:
+            out.append(line)
+        else:
+            buffer.append(line)
+    flush()
+    return ''.join(out)
 
 
 def github_slugify(value, separator):
@@ -588,8 +700,9 @@ def add_collapsible_sections(body_html):
 # Pygments tokenizes each code block into <span class="k">, <span class="nf">…
 # using short token classes. Rather than ship one hard-coded palette, we emit
 # CSS for a family of named schemes (VS Code, Monokai, One Dark Pro, Tokyo
-# Night, Ayu, Catppuccin, Classic, High Contrast) — each with a dark and a
-# light variant.
+# Night, Ayu, Catppuccin, Paper, Classic, High Contrast) — each with a dark
+# and a light variant. Paper is the warm editorial palette (cream paper / ink,
+# Palatino, rust · navy · olive · purple prose).
 # Every rule is scoped by BOTH
 # the active scheme and the light/dark mode, e.g.
 #   body[data-scheme="vscode"][data-theme="dark"] .tab-content pre code.pygcode .k
@@ -741,6 +854,30 @@ SYNTAX_SCHEMES = [
             'error': '#d20f39',
         },
     }),
+    # Warm editorial palette from the strategy-comparison notes: cream paper and
+    # dark ink, with rust / navy / olive / purple as the prose colors. Light
+    # mode code sits on the cream card with those dark hues; dark mode code
+    # sits on ink with the lifted hues. Heading colors are set in SCHEME_UI.
+    ('paper', 'Paper', {
+        'dark': {
+            'bg': '#12100d', 'border': '#3d362c', 'base': '#f4f1ea',
+            'comment': '#a39888', 'keyword': '#e8926a', 'type': '#d2a4ef',
+            'operator': '#e7d7c3', 'string': '#b5cf78', 'number': '#8eb4e3',
+            'function': '#e8926a', 'decorator': '#d2a4ef', 'klass': '#d2a4ef',
+            'namespace': '#8eb4e3', 'builtin': '#8eb4e3', 'constant': '#e8926a',
+            'variable': '#f4f1ea', 'attribute': '#b5cf78', 'tag': '#e8926a',
+            'error': '#f09aaf',
+        },
+        'light': {
+            'bg': '#fffdf8', 'border': '#d9d2c5', 'base': '#1c1915',
+            'comment': '#8a8175', 'keyword': '#9a3412', 'type': '#6b21a8',
+            'operator': '#5c564c', 'string': '#3f6212', 'number': '#1d4e89',
+            'function': '#9a3412', 'decorator': '#6b21a8', 'klass': '#6b21a8',
+            'namespace': '#1d4e89', 'builtin': '#1d4e89', 'constant': '#9a3412',
+            'variable': '#1c1915', 'attribute': '#3f6212', 'tag': '#9a3412',
+            'error': '#9f1239',
+        },
+    }),
     # The original htmler palette (GitHub-flavored code tokens on htmler's own
     # blue chrome). Kept verbatim as 'Classic' — this is the pre-theme-overhaul
     # look, renamed from the former 'Default'. Handled specially in
@@ -791,6 +928,10 @@ DEFAULT_SCHEME = 'vscode'
 
 # id -> {'dark': {...}, 'light': {...}} for quick token-color lookups.
 SYNTAX_SCHEMES_BY_ID = {s: palettes for s, _label, palettes in SYNTAX_SCHEMES}
+
+# Serif stack used by the Paper scheme (same faces as the strategy notes).
+_PAPER_FONT = ('"Iowan Old Style", Palatino, "Palatino Linotype", '
+               '"Book Antiqua", Georgia, serif')
 
 # Whole-page UI palette per scheme+mode. These drive the CSS custom properties
 # (page/sidebar/header backgrounds, borders, text, accent), so switching scheme
@@ -846,6 +987,26 @@ SCHEME_UI = {
                   'border': '#ccd0da', 'text': '#4c4f69', 'text2': '#6c6f85',
                   'text3': '#8c8fa1', 'accent': '#1e66f5', 'toc': '#8839ef'},
     },
+    # Cream paper in the light, the notes' ink (#1c1915) in the dark. `content`
+    # is the page field; `surface` is the sidebar card; `card` is tables.
+    # Headings stay the ink/paper color — the rust/navy/olive/purple live on
+    # the {gc} {cc} {st} {dy} prose marks, not on every title.
+    'paper': {
+        'dark':  {'bg': '#1c1915', 'content': '#1c1915', 'surface': '#24201b',
+                  'elev': '#2e2923', 'card': '#26221c',
+                  'border': '#3d362c', 'text': '#f4f1ea', 'text2': '#b7aea2',
+                  'text3': '#8a8175', 'accent': '#8eb4e3', 'toc': '#b5cf78',
+                  'h1': '#f4f1ea', 'h2': '#f4f1ea', 'h3': '#f4f1ea', 'h4': '#f4f1ea',
+                  'inline': '#e8926a', 'table': '#b7aea2',
+                  'font': _PAPER_FONT, 'flat': True},
+        'light': {'bg': '#f4f1ea', 'content': '#f4f1ea', 'surface': '#fffdf8',
+                  'elev': '#efeae0', 'card': '#fffdf8',
+                  'border': '#d9d2c5', 'text': '#1c1915', 'text2': '#5c564c',
+                  'text3': '#8a8175', 'accent': '#1d4e89', 'toc': '#3f6212',
+                  'h1': '#1c1915', 'h2': '#1c1915', 'h3': '#1c1915', 'h4': '#1c1915',
+                  'inline': '#9a3412', 'table': '#5c564c',
+                  'font': _PAPER_FONT, 'flat': True},
+    },
     'highcontrast': {
         'dark':  {'bg': '#000000', 'surface': '#0d0d0d', 'elev': '#1a1a1a',
                   'border': '#6fc3df', 'text': '#ffffff', 'text2': '#d6d6d6',
@@ -885,7 +1046,7 @@ def _scheme_ui_css(scheme, mode):
     v = {
         '--bg-body': bg,
         '--bg-sidebar': surface,
-        '--bg-content': surface,
+        '--bg-content': ui.get('content', surface),
         '--bg-header': _rgba(surface, 0.82),
         '--glass-bg': 'linear-gradient(180deg, %s 0%%, %s 100%%)' % (
             _rgba(surface, 0.85), _rgba(surface, 0.6)),
@@ -909,15 +1070,15 @@ def _scheme_ui_css(scheme, mode):
         '--text-muted': text3,
         '--text-strong': text,
         '--text-blockquote': text2,
-        '--text-heading-h1': accent,
-        '--text-heading-h2': tok['function'],
-        '--text-heading-h3': tok['type'],
-        '--text-heading-h4': tok['klass'],
-        '--text-code-inline': tok['string'],
+        '--text-heading-h1': ui.get('h1', accent),
+        '--text-heading-h2': ui.get('h2', tok['function']),
+        '--text-heading-h3': ui.get('h3', tok['type']),
+        '--text-heading-h4': ui.get('h4', tok['klass']),
+        '--text-code-inline': ui.get('inline', tok['string']),
         '--text-link': accent,
         '--text-link-hover': hover,
         '--text-tab-active': accent,
-        '--text-table-header': accent,
+        '--text-table-header': ui.get('table', accent),
         '--accent': accent,
         '--accent-soft': _rgba(accent, 0.14),
         '--accent-strong': _rgba(accent, 0.30),
@@ -933,6 +1094,18 @@ def _scheme_ui_css(scheme, mode):
         '--nav-hl-toc-bg': _rgba(ui['toc'], 0.15),
         '--scrollbar-thumb': _mix(border, text, 0.15),
     }
+    if ui.get('font'):
+        v['--font-sans'] = ui['font']
+    if 'radius' in ui:
+        v['--radius-sm'] = ui['radius']
+        v['--radius-md'] = ui['radius']
+        v['--radius-lg'] = ui['radius']
+    if ui.get('flat'):
+        v['--shadow-sm'] = 'none'
+        v['--shadow-md'] = 'none'
+        v['--shadow-lg'] = 'none'
+    if ui.get('card'):
+        v['--paper-card'] = ui['card']
     decls = ' '.join('%s: %s;' % (k, val) for k, val in v.items())
     root = 'body[data-scheme="%s"][data-theme="%s"]' % (scheme, mode)
     return '%s { %s }' % (root, decls)
@@ -1131,20 +1304,8 @@ def make_label(rel_path):
 
 
 def get_language_from_extension(filepath):
-    """Map file extension to markdown language identifier."""
-    ext_map = {
-        '.c': 'c',
-        '.cpp': 'cpp',
-        '.cc': 'cpp',
-        '.cxx': 'cpp',
-        '.c++': 'cpp',
-        '.cu': 'cuda',
-        '.h': 'c',
-        '.hpp': 'cpp',
-        '.py': 'python',
-    }
-    ext = os.path.splitext(filepath)[1].lower()
-    return ext_map.get(ext, 'text')
+    """Map file extension to a Markdown / Pygments language identifier."""
+    return code_lang_for(filepath) or 'text'
 
 
 def wrap_code_file_as_markdown(filepath):
@@ -1468,7 +1629,7 @@ for order, md_path in enumerate(md_files, start=1):
     tab_name = "{0}. {1}".format(order, label)
 
     # Check if it's a code file or notebook and wrap/parse it accordingly
-    if rel_path.lower().endswith(('.c', '.cpp', '.cu', '.h', '.hpp', '.py')):
+    if code_lang_for(rel_path):
         md_text = wrap_code_file_as_markdown(md_path)
     elif rel_path.lower().endswith('.ipynb'):
         md_text = wrap_ipynb_file_as_markdown(md_path)
@@ -1496,6 +1657,7 @@ for order, md_path in enumerate(md_files, start=1):
     # then the plain ```diagram fenced form.
     md_text = DIAGRAM_COMMENT_RE.sub(_stash_diagram, md_text)
     md_text = DIAGRAM_FENCE_RE.sub(_stash_diagram, md_text)
+    md_text = colorize_ink(md_text)
 
     md_text, bq_code_stashes = stash_blockquote_code_blocks(md_text)
     md_text, math_replacements = protect_latex_delimiters(md_text)
@@ -1593,7 +1755,7 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <!-- Typography -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Google+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Source+Code+Pro:wght@400;500;600&family=Source+Serif+4:wght@400;600;700&display=swap">
 <!-- Syntax highlighting is baked in at build time (Pygments); no runtime highlighter needed. -->
 <script>
 window.MathJax = {
@@ -1619,6 +1781,8 @@ window.MathJax = {
     --content-max: none;
 
     --font-sans: "Inter", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* Reader size. 1 is the designed size; the navbar stepper changes it. */
+    --font-scale: 1;
     --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
 
     --radius-sm: 6px;
@@ -1710,6 +1874,15 @@ window.MathJax = {
     --nav-hl-toc-bg: rgba(230,180,80,0.16);
     --scrollbar-thumb: #2a2e40;
 
+    /* Prose ink colors (strategy notes). Dark-mode lifts of the light hues
+       so rust / navy / olive / purple / fail / pass stay readable on ink. */
+    --gc: #e8926a;
+    --cc: #8eb4e3;
+    --st: #b5cf78;
+    --dy: #d2a4ef;
+    --bad: #f09aaf;
+    --ok: #b5cf78;
+
     /* Diagram (```diagram) box accent palette */
     --d-blue: #5aa2f0;
     --d-green: #56c98a;
@@ -1798,6 +1971,14 @@ window.MathJax = {
     --nav-hl-toc-bg: rgba(184,115,15,0.14);
     --scrollbar-thumb: #d0d4e2;
 
+    /* Prose ink colors — exact strategy-notes hues on cream paper. */
+    --gc: #9a3412;
+    --cc: #1d4e89;
+    --st: #3f6212;
+    --dy: #6b21a8;
+    --bad: #9f1239;
+    --ok: #3f6212;
+
     /* Diagram (```diagram) box accent palette (darker for light bg contrast) */
     --d-blue: #1f6fc4;
     --d-green: #2f8f52;
@@ -1818,8 +1999,8 @@ html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     /* Hide the browser's main page scrollbar (right + bottom) while keeping
-       the page fully scrollable. Per-component scrollbars (sidebars, code
-       blocks, tables) keep their own styled thin scrollbars. */
+       the page fully scrollable. Sidebars and code blocks scroll the same
+       way, without a visible bar. Tables keep a thin one. */
     scrollbar-width: none;        /* Firefox */
     -ms-overflow-style: none;     /* legacy Edge/IE */
 }
@@ -2201,6 +2382,86 @@ body.nav-condensed .nav-doc-title {
     transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.32,0.72,0,1), visibility 0.2s;
 }
 .scheme-menu.open { opacity: 1; visibility: visible; transform: translateY(0) scale(1); }
+.font-menu { min-width: 220px; }
+.font-toggle-mark {
+    font-family: Palatino, "Palatino Linotype", Georgia, serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1;
+}
+/* Size stepper lives inside the font menu, not in the navbar. */
+.font-size-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 4px 6px;
+    padding: 2px 4px 8px;
+    border-bottom: 1px solid var(--glass-border);
+}
+.font-size-row .scheme-menu-title { padding: 4px 6px; }
+.font-size-ctrl {
+    position: relative;
+    display: inline-flex;
+    align-items: stretch;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--ctrl-bg);
+    border: 1px solid var(--ctrl-border);
+    box-shadow: var(--ctrl-shadow);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: background 0.3s cubic-bezier(0.32,0.72,0,1), box-shadow 0.3s cubic-bezier(0.32,0.72,0,1);
+}
+.font-size-ctrl::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--glass-rim);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    pointer-events: none;
+    opacity: 0.7;
+    z-index: 1;
+    transition: opacity 0.3s cubic-bezier(0.32,0.72,0,1);
+}
+.font-size-ctrl:hover {
+    background: var(--ctrl-bg-hover);
+    box-shadow: var(--ctrl-shadow-hover);
+}
+.font-size-ctrl:hover::after { opacity: 0.95; }
+.font-size-ctrl button {
+    appearance: none;
+    -webkit-appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--ctrl-fg);
+    font-family: var(--font-sans);
+    cursor: pointer;
+    padding: 0 10px;
+    line-height: 1;
+}
+.font-size-ctrl button + button {
+    box-shadow: inset 1px 0 0 var(--ctrl-border);
+}
+.font-size-ctrl button:hover:not(:disabled) { background: var(--ctrl-bg-hover); }
+.font-size-ctrl button:disabled { opacity: 0.35; cursor: default; }
+.font-size-ctrl .font-size-step { font-size: 15px; font-weight: 600; }
+.font-scale-label {
+    min-width: 2.8em;
+    padding: 0 2px;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+}
 .scheme-menu-title {
     font-size: 10.5px;
     font-weight: 700;
@@ -2488,19 +2749,18 @@ body.nav-condensed .nav-doc-title {
 /* === Sidebar nav (Left) & TOC (Right) ===
    The sidebars span the full viewport height so their backgrounds meet the navbar
    seamlessly. */
-.sidebar-nav {
+.sidebar-nav,
+.toc-sidebar {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
-    /* Frosted "glass" panel rather than a flat solid fill: a soft translucent
-       gradient (surface at the top fading toward the page tone at the bottom),
-       blended with the page behind it and blurred, so it reads as a pane of
-       glass rather than one flat color. */
-    background: linear-gradient(180deg,
-        color-mix(in srgb, var(--bg-sidebar) 82%, transparent) 0%,
-        color-mix(in srgb, var(--bg-body) 60%, transparent) 100%);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    backdrop-filter: blur(16px) saturate(1.4);
-    border-right: 1px solid var(--border-main);
+    /* Same glass fill and blur as the theme button. Square, with no rim
+       line of its own — the button's 1px ring reads as a stripe on a pane. */
+    border-radius: 0;
+    background: var(--ctrl-bg);
+    border: none;
+    box-shadow: var(--ctrl-shadow);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
     position: sticky;
     top: 0;
     height: 100vh;
@@ -2508,14 +2768,13 @@ body.nav-condensed .nav-doc-title {
     overflow-y: auto;
     overflow-x: hidden;
     flex-shrink: 0;
-    transition: width 0.2s, min-width 0.2s, padding 0.2s, opacity 0.2s, background 0.25s, border-color 0.25s;
+    transition: width 0.2s, min-width 0.2s, padding 0.2s, opacity 0.2s, background 0.25s, border-color 0.25s, box-shadow 0.25s;
     z-index: 50;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) var(--bg-sidebar);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
-.sidebar-nav::-webkit-scrollbar { width: 5px; }
-.sidebar-nav::-webkit-scrollbar-track { background: var(--bg-sidebar); }
-.sidebar-nav::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+.sidebar-nav::-webkit-scrollbar,
+.toc-sidebar::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
 .sidebar-nav.collapsed {
     width: 0;
@@ -2524,33 +2783,6 @@ body.nav-condensed .nav-doc-title {
     opacity: 0;
     pointer-events: none;
 }
-
-.toc-sidebar {
-    width: var(--sidebar-width);
-    min-width: var(--sidebar-width);
-    /* Matches .sidebar-nav: a frosted, translucent glass gradient instead of a
-       flat solid fill. */
-    background: linear-gradient(180deg,
-        color-mix(in srgb, var(--bg-sidebar) 82%, transparent) 0%,
-        color-mix(in srgb, var(--bg-body) 60%, transparent) 100%);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    backdrop-filter: blur(16px) saturate(1.4);
-    border-left: 1px solid var(--border-main);
-    position: sticky;
-    top: 0;
-    height: 100vh;
-    padding-top: var(--header-height);
-    overflow-y: auto;
-    overflow-x: hidden;
-    flex-shrink: 0;
-    transition: width 0.2s, min-width 0.2s, padding 0.2s, opacity 0.2s, background 0.25s, border-color 0.25s;
-    z-index: 50;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) var(--bg-sidebar);
-}
-.toc-sidebar::-webkit-scrollbar { width: 5px; }
-.toc-sidebar::-webkit-scrollbar-track { background: var(--bg-sidebar); }
-.toc-sidebar::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
 
 .toc-sidebar.collapsed {
     width: 0;
@@ -2587,13 +2819,13 @@ body.nav-condensed .nav-doc-title {
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     user-select: none;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.3s cubic-bezier(0.32,0.72,0,1), color 0.2s ease;
 }
 .nav-dir-header:hover {
-    color: var(--text-primary);
-    background: var(--bg-code-block);
+    color: var(--accent);
+    background: var(--ctrl-bg-hover);
 }
 .nav-dir-header .chevron-icon {
     width: 14px;
@@ -2659,17 +2891,17 @@ body.nav-condensed .nav-doc-title {
     text-decoration: none;
     font-size: 12px;
     line-height: 1.5;
-    border-radius: 3px;
-    border-left: 2px solid transparent;
-    transition: color 0.12s, background 0.12s, border-color 0.12s;
+    border-radius: 0;
+    border-left: none;
+    transition: color 0.2s ease, background 0.3s cubic-bezier(0.32,0.72,0,1);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .nav-list a:hover {
-    color: var(--text-primary);
-    background: var(--bg-code-block);
+    color: var(--accent);
+    background: var(--ctrl-bg-hover);
 }
 
 /* "On this page" (TOC): nested list with a dashed vertical guide per indent
@@ -2691,10 +2923,11 @@ body.nav-condensed .nav-doc-title {
 
 /* "On this page" (TOC) active heading — themed accent (orange/yellow on the
    Default theme; each other theme supplies its own matching hue). */
-#navList a.nav-active {
-    color: var(--nav-hl-toc);
-    background: var(--nav-hl-toc-bg);
-    border-left-color: var(--nav-hl-toc);
+#navList a.nav-active,
+#navList a.nav-active:hover {
+    color: var(--accent);
+    background: var(--ctrl-bg-hover);
+    border-radius: 0;
 }
 
 .nav-list .nav-h1 { padding-left: 10px; font-weight: 600; color: var(--text-secondary); margin-top: 6px; }
@@ -2704,15 +2937,12 @@ body.nav-condensed .nav-doc-title {
 
 /* Active document — identical highlight treatment to the TOC, but a distinct
    (blue) hue so the two sidebars are easy to tell apart. */
-#docList a.nav-doc-active {
-    color: var(--nav-hl-doc);
-    background: var(--nav-hl-doc-bg);
-    border-left-color: var(--nav-hl-doc);
-    font-weight: 600;
-}
+#docList a.nav-doc-active,
 #docList a.nav-doc-active:hover {
-    color: var(--nav-hl-doc);
-    background: var(--nav-hl-doc-bg);
+    color: var(--accent);
+    background: var(--ctrl-bg-hover);
+    border-radius: 0;
+    font-weight: 600;
 }
 
 .sidebar-section + .sidebar-section {
@@ -2728,6 +2958,7 @@ body.nav-condensed .nav-doc-title {
 
 .tab-content {
     display: none;
+    font-size: calc(1em * var(--font-scale, 1));
     max-width: var(--content-max);
     margin: 0 auto;
     background: var(--bg-content);
@@ -3082,7 +3313,7 @@ body.nav-condensed .nav-doc-title {
 }
 .callout-title {
     font-weight: 700;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     letter-spacing: 0.01em;
     margin-bottom: 4px;
     color: var(--accent);
@@ -3109,7 +3340,7 @@ body.nav-condensed .nav-doc-title {
     background: linear-gradient(180deg, rgba(127,127,127,0.04), transparent);
 }
 .diagram-title {
-    font-size: 17px;
+    font-size: calc(17px * var(--font-scale, 1));
     font-weight: 800;
     letter-spacing: -0.01em;
     color: var(--text-primary);
@@ -3132,7 +3363,7 @@ body.nav-condensed .nav-doc-title {
     left: 18px;
     padding: 1px 10px;
     border-radius: 7px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 800;
     letter-spacing: 1px;
     text-transform: uppercase;
@@ -3142,7 +3373,7 @@ body.nav-condensed .nav-doc-title {
 .dbox.dashed { border-style: dashed; }
 .dtext {
     color: var(--text-secondary);
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
     line-height: 1.55;
     margin: 8px 0;
 }
@@ -3233,6 +3464,74 @@ body.nav-condensed .nav-doc-title {
 .tab-content strong { color: var(--text-strong); font-weight: 700; }
 .tab-content em { color: var(--text-primary); font-style: italic; }
 
+/* Colored prose, same classes as the strategy notes:
+   {gc}…{/gc} {cc}…{/cc} {st}…{/st} {dy}…{/dy} {fail}…{/fail} {pass}…{/pass}
+   Aliases (rust, blue, green, …) compile to these classes. Kept off the
+   diagram color names (green, red, …) so ```diagram boxes are not restyled.
+   Color follows the light/dark toggle via --gc/--cc/--st/--dy/--bad/--ok. */
+.tab-content .gc { color: var(--gc); }
+.tab-content .cc { color: var(--cc); }
+.tab-content .st { color: var(--st); }
+.tab-content .dy { color: var(--dy); }
+.tab-content .fail { color: var(--bad); font-weight: 600; }
+.tab-content .pass { color: var(--ok); font-weight: 600; }
+.tab-content .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: calc(12px * var(--font-scale, 1));
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 400;
+}
+
+/* Paper: editorial type, quiet headings, card tables, ink code blocks. */
+body[data-scheme="paper"] .tab-content {
+    font-size: calc(15px * var(--font-scale, 1));
+    line-height: 1.55;
+}
+body[data-scheme="paper"] .tab-content h1,
+body[data-scheme="paper"] .tab-content h2,
+body[data-scheme="paper"] .tab-content h3,
+body[data-scheme="paper"] .tab-content h4 {
+    font-weight: 600;
+    letter-spacing: 0;
+}
+body[data-scheme="paper"] .tab-content h2 {
+    border-left: none;
+    padding-left: 0;
+}
+body[data-scheme="paper"] .tab-content th {
+    font-family: var(--font-mono);
+    font-size: calc(12px * var(--font-scale, 1));
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+}
+body[data-scheme="paper"] .tab-content table {
+    background: var(--paper-card);
+    box-shadow: none;
+}
+body[data-scheme="paper"] .tab-content pre {
+    box-shadow: none;
+}
+body[data-scheme="paper"][data-theme="dark"] .tab-content code.has-linenos .lnr {
+    color: #a39888;
+    opacity: 0.75;
+}
+body[data-scheme="paper"][data-theme="light"] .tab-content code.has-linenos .lnr {
+    color: #8a8175;
+    opacity: 0.9;
+}
+body[data-scheme="paper"][data-theme="dark"] .tab-content code.has-linenos .cl:target,
+body[data-scheme="paper"][data-theme="dark"] .tab-content code.has-linenos .cl.line-active {
+    background: rgba(244, 241, 234, 0.08);
+}
+body[data-scheme="paper"][data-theme="light"] .tab-content code.has-linenos .cl:target,
+body[data-scheme="paper"][data-theme="light"] .tab-content code.has-linenos .cl.line-active {
+    background: rgba(28, 25, 21, 0.06);
+}
+
 /* === Inline code === */
 .tab-content code {
     font-family: var(--font-mono);
@@ -3287,7 +3586,7 @@ body.nav-condensed .nav-doc-title {
     box-sizing: border-box;
     padding: 0 20px 0 0;
     border: none;
-    font-size: 13.5px;
+    font-size: calc(13.5px * var(--font-scale, 1));
 }
 
 /* === Build-time syntax highlighting (Pygments) ===
@@ -3307,7 +3606,7 @@ body.nav-condensed .nav-doc-title {
     position: absolute;
     top: 8px;
     right: 12px;
-    font-size: 10px;
+    font-size: calc(10px * var(--font-scale, 1));
     font-family: var(--font-mono);
     color: var(--text-muted);
     text-transform: uppercase;
@@ -3325,7 +3624,7 @@ body.nav-condensed .nav-doc-title {
     align-items: center;
     gap: 5px;
     font-family: var(--font-sans);
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 600;
     color: var(--text-secondary);
     background: var(--bg-code-inline);
@@ -3429,7 +3728,7 @@ body.nav-condensed .nav-doc-title {
     border-spacing: 0;
     margin: 18px 0;
     width: 100%;
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
     border: 1px solid var(--border-table);
     border-radius: var(--radius-md);
     overflow: hidden;
@@ -3512,7 +3811,11 @@ body.nav-condensed .nav-doc-title {
     .brand-name { display: none; }
     .brand { margin-right: 0; }
 
-    .content-area { padding: calc(var(--header-height) + 18px) 20px 64px; }
+    .content-area { padding: calc(var(--header-height) + 18px) 20px calc(var(--dock-clearance, 120px) + 52px); }
+    /* Sit above the footer dock. The dock rules live with the footer CSS so
+       they win over the base pill layout. */
+    .to-top { bottom: var(--dock-clearance, 120px); }
+    .gjump-badge { bottom: calc(var(--dock-clearance, 120px) + 52px); }
     .tab-content { padding: 26px 22px 40px; border-radius: var(--radius-md); }
     .search-kbd { display: none; }
 
@@ -3522,17 +3825,10 @@ body.nav-condensed .nav-doc-title {
         top: 0;
         height: 100vh;
         z-index: 150;
-        /* As an overlay drawer the document scrolls underneath, so keep the
-           frosted-glass gradient but lean more opaque for legibility. */
-        background: linear-gradient(180deg,
-            color-mix(in srgb, var(--bg-sidebar) 92%, transparent) 0%,
-            color-mix(in srgb, var(--bg-body) 82%, transparent) 100%);
-        -webkit-backdrop-filter: blur(18px) saturate(1.4);
-        backdrop-filter: blur(18px) saturate(1.4);
-        box-shadow: var(--shadow-lg);
+        box-shadow: var(--glass-shadow);
     }
-    .sidebar-nav { left: 0; border-right: 1px solid var(--border-main); }
-    .toc-sidebar { right: 0; border-left: 1px solid var(--border-main); }
+    .sidebar-nav { left: 0; }
+    .toc-sidebar { right: 0; }
 
     /* Dimmed, blurred backdrop while either drawer is open. */
     body::before {
@@ -3573,10 +3869,9 @@ body.nav-condensed .nav-doc-title {
         padding-left: max(14px, env(safe-area-inset-left));
         padding-right: max(14px, env(safe-area-inset-right));
         padding-top: calc(var(--header-height) + 14px);
-        padding-bottom: 56px;
     }
     /* Edge-to-edge reading panel on small screens. */
-    .tab-content { padding: 22px 16px 36px; border: none; border-radius: 0; box-shadow: none; }
+    .tab-content { padding: 22px 16px 36px; border-radius: var(--radius-md); }
     .tab-content h1 { font-size: 1.7em; }
     .tab-content h2 { font-size: 1.34em; }
     .tab-content h3 { font-size: 1.16em; }
@@ -3599,13 +3894,29 @@ body.nav-condensed .nav-doc-title {
        still fits with a usable-width picker on the right. */
     .nav-btn-group-docnav { display: none; }
     .nav-back { display: none; }
-    .doc-select { max-width: 46vw; }
+    /* The document picker takes whatever space the icon buttons leave, so a
+       long title ellipsizes instead of pushing Search / Aa / theme off screen. */
+    .doc-selector { flex: 1 1 0; min-width: 0; }
+    .doc-select { width: 100%; min-width: 0; max-width: 100%; }
     .header-inner { gap: 6px; }
     .search-widget { gap: 6px; }
     /* Comfortable tap targets. */
     .brand-toggle, .theme-toggle, .search-toggle, .toc-toggle { width: 38px; height: 38px; }
+    .nav-btn-group { gap: 6px; }
     .doc-select { height: 38px; }
-    .content-area { padding-top: calc(var(--header-height) + 10px); padding-bottom: 48px; }
+    /* Pin both dropdowns to the viewport so a long font or theme list stays
+       on screen instead of running off the left or the bottom. */
+    .scheme-menu {
+        position: fixed;
+        top: calc(var(--header-height) + 8px);
+        left: max(8px, env(safe-area-inset-left));
+        right: max(8px, env(safe-area-inset-right));
+        width: auto;
+        min-width: 0;
+        max-height: min(70vh, 520px);
+        overflow-y: auto;
+    }
+    .content-area { padding-top: calc(var(--header-height) + 10px); }
     .tab-content { padding: 18px 14px 32px; }
     .tab-content h1 { font-size: 1.5em; padding-bottom: 12px; margin-bottom: 18px; }
     .tab-content h2 { margin: 30px 0 12px; }
@@ -3613,14 +3924,14 @@ body.nav-condensed .nav-doc-title {
     /* No hover on touch, so keep the copy button visible. */
     .code-copy-btn { opacity: 1; transform: none; }
     .nav-doc-title { max-width: 64vw; font-size: 13px; padding: 6px 14px; }
-    /* Prevent the back-to-top button from overlapping the page credit footer on mobile */
-    .to-top { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 54px); }
 }
 
 /* ---- Very small phones ---- */
 @media (max-width: 380px) {
     .header-inner { gap: 4px; padding-left: 8px; padding-right: 8px; }
+    .nav-btn-group, .doc-selector { gap: 4px; }
     .brand-toggle, .theme-toggle, .search-toggle, .toc-toggle { width: 36px; height: 36px; }
+    .doc-select { height: 36px; padding-left: 10px; padding-right: 22px; }
     .tab-content { padding: 16px 11px 28px; }
 }
 
@@ -3715,6 +4026,32 @@ body.nav-condensed .nav-doc-title {
     font-size: 12px;
 }
 
+/* Tablet and phone: the two footer pills and the centered back-to-top button
+   share one bottom edge. Wrap the pills so they stack instead of overlapping,
+   and keep them inside the safe area. --dock-clearance (set from the dock's
+   real height) lifts the button above whichever row count fits. */
+@media (max-width: 1024px) {
+    .page-credit-wrap {
+        left: max(10px, env(safe-area-inset-left));
+        right: max(10px, env(safe-area-inset-right));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+    }
+    .page-credit,
+    .page-credit-badge {
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
+        text-align: center;
+        justify-content: center;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+}
+
 /* === Print === */
 @media print {
     .header-bar, .sidebar-nav, .toc-sidebar, .sidebar-toggle, .to-top,
@@ -3771,6 +4108,12 @@ body.nav-condensed .nav-doc-title {
         <button class="search-toggle" id="searchTrigger" title="Search all documents (Ctrl+K)" aria-label="Search">
           <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"></path></svg>
         </button>
+        <div class="scheme-picker">
+          <button class="theme-toggle scheme-toggle" id="fontToggle" title="Reading font" aria-label="Reading font" aria-haspopup="true" aria-expanded="false">
+            <span class="font-toggle-mark">Aa</span>
+          </button>
+          <div class="scheme-menu font-menu" id="fontMenu" role="menu" aria-hidden="true"></div>
+        </div>
         <div class="scheme-picker">
           <button class="theme-toggle scheme-toggle" id="schemeToggle" title="Code color theme" aria-label="Code color theme" aria-haspopup="true" aria-expanded="false">
             <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13c.76 0 1.375-.616 1.375-1.375 0-.35-.132-.667-.35-.908a1.372 1.372 0 0 1-.35-.908c0-.76.616-1.376 1.375-1.376H11.5A3 3 0 0 0 14.5 7c0-3.038-2.91-5.5-6.5-5.5Zm-4 7a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1.75-3a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm4.5 0a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm2.25 3a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>
@@ -3854,15 +4197,34 @@ const pageCredit = document.getElementById('pageCredit');
 const pageCreditBadge = document.querySelector('.page-credit-badge');
 let navLastY = 0;
 
+function syncDockClearance() {
+    const wrap = document.querySelector('.page-credit-wrap');
+    if (!wrap) return;
+    // Only the tablet/phone layout parks the back-to-top button above the
+    // footer. On a wide screen the button sits in the gap between the pills.
+    if (!window.matchMedia('(max-width: 1024px)').matches) {
+        document.documentElement.style.removeProperty('--dock-clearance');
+        return;
+    }
+    const bottom = parseFloat(window.getComputedStyle(wrap).bottom) || 0;
+    const clearance = Math.ceil(wrap.offsetHeight + bottom + 14);
+    document.documentElement.style.setProperty('--dock-clearance', clearance + 'px');
+}
+
 function updatePageCredit() {
     const scrollable = document.documentElement.scrollHeight - window.innerHeight;
     const nearEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 24;
     const shouldShow = nearEnd || scrollable <= 24;
     if (pageCredit) pageCredit.classList.toggle('visible', shouldShow);
     if (pageCreditBadge) pageCreditBadge.classList.toggle('visible', shouldShow);
+    syncDockClearance();
 }
 window.addEventListener('scroll', updatePageCredit, { passive: true });
 window.addEventListener('resize', updatePageCredit);
+if (window.ResizeObserver) {
+    const dock = document.querySelector('.page-credit-wrap');
+    if (dock) new ResizeObserver(syncDockClearance).observe(dock);
+}
 window.addEventListener('load', updatePageCredit);
 updatePageCredit();
 
@@ -4366,6 +4728,7 @@ const SCHEME_SWATCHES = {
     tokyonight:   ['#bb9af7', '#9ece6a', '#7aa2f7', '#e0af68'],
     ayu:          ['#ff8f40', '#aad94c', '#ffb454', '#59c2ff'],
     catppuccin:   ['#cba6f7', '#a6e3a1', '#89b4fa', '#fab387'],
+    paper:        ['#9a3412', '#1d4e89', '#3f6212', '#6b21a8'],
     classic:      ['#ff7b72', '#a5d6ff', '#d2a8ff', '#7ee787'],
     highcontrast: ['#4fc1ff', '#ffb86c', '#fff95e', '#4effe3']
 };
@@ -4409,6 +4772,7 @@ function buildSchemeMenu() {
 }
 
 function openSchemeMenu() {
+    closeFontMenu();
     schemeMenu.classList.add('open');
     schemeMenu.setAttribute('aria-hidden', 'false');
     schemeToggleBtn.setAttribute('aria-expanded', 'true');
@@ -4439,10 +4803,204 @@ document.addEventListener('click', (e) => {
         !schemeMenu.contains(e.target) && !schemeToggleBtn.contains(e.target)) {
         closeSchemeMenu();
     }
+    if (fontMenu.classList.contains('open') &&
+        !fontMenu.contains(e.target) && !fontToggleBtn.contains(e.target)) {
+        closeFontMenu();
+    }
 });
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && schemeMenu.classList.contains('open')) closeSchemeMenu();
+    if (e.key === 'Escape' && fontMenu.classList.contains('open')) closeFontMenu();
 });
+
+/* ───── Reading font picker ─────
+   Sets --font-sans and --font-mono on <body> as inline properties so the
+   choice beats a scheme's built-in face (Paper uses Palatino). "Theme default"
+   clears the override and lets the active scheme decide. Remembered across
+   visits, same as the color theme. ───── */
+const FONTS = [
+    { group: 'Sans', id: 'inter', label: 'Inter',
+      sans: '"Inter", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+      mono: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Sans', id: 'google-sans', label: 'Google Sans',
+      sans: '"Google Sans", "Product Sans", Roboto, Arial, sans-serif',
+      mono: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Sans', id: 'plex-sans', label: 'IBM Plex Sans',
+      sans: '"IBM Plex Sans", "Segoe UI", sans-serif',
+      mono: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace' },
+    { group: 'Sans', id: 'system', label: 'System',
+      sans: '-apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+      mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Serif', id: 'iowan', label: 'Iowan Old Style',
+      sans: '"Iowan Old Style", Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif',
+      mono: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Serif', id: 'palatino', label: 'Palatino',
+      sans: 'Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif',
+      mono: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Serif', id: 'source-serif', label: 'Source Serif',
+      sans: '"Source Serif 4", Palatino, Georgia, serif',
+      mono: '"Source Code Pro", ui-monospace, Menlo, Consolas, monospace' },
+    { group: 'Serif', id: 'georgia', label: 'Georgia',
+      sans: 'Georgia, "Iowan Old Style", Palatino, serif',
+      mono: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Mono', id: 'jetbrains', label: 'JetBrains Mono',
+      sans: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+      mono: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Mono', id: 'firacode', label: 'Fira Code',
+      sans: '"Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+      mono: '"Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace' },
+    { group: 'Mono', id: 'plex-mono', label: 'IBM Plex Mono',
+      sans: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace',
+      mono: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace' },
+    { group: 'Mono', id: 'source-code', label: 'Source Code Pro',
+      sans: '"Source Code Pro", ui-monospace, Menlo, Consolas, monospace',
+      mono: '"Source Code Pro", ui-monospace, Menlo, Consolas, monospace' }
+];
+
+const fontToggleBtn = document.getElementById('fontToggle');
+const fontMenu = document.getElementById('fontMenu');
+
+function getStoredFont() {
+    try { return localStorage.getItem('doc-font'); } catch (e) { return null; }
+}
+
+function fontById(id) {
+    for (let i = 0; i < FONTS.length; i++) {
+        if (FONTS[i].id === id) return FONTS[i];
+    }
+    return null;
+}
+
+function setFont(id, persist) {
+    const chosen = fontById(id);
+    if (!chosen) {
+        document.body.removeAttribute('data-font');
+        document.body.style.removeProperty('--font-sans');
+        document.body.style.removeProperty('--font-mono');
+        if (persist) { try { localStorage.removeItem('doc-font'); } catch (e) {} }
+    } else {
+        document.body.setAttribute('data-font', chosen.id);
+        document.body.style.setProperty('--font-sans', chosen.sans);
+        document.body.style.setProperty('--font-mono', chosen.mono);
+        if (persist) { try { localStorage.setItem('doc-font', chosen.id); } catch (e) {} }
+    }
+    const active = chosen ? chosen.id : 'theme';
+    fontMenu.querySelectorAll('.scheme-item').forEach((el) => {
+        const on = el.getAttribute('data-font') === active;
+        el.classList.toggle('active', on);
+        el.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+}
+
+function buildFontMenu() {
+    let html = '<div class="font-size-row">'
+         + '<div class="scheme-menu-title">Size</div>'
+         + '<div class="font-size-ctrl" role="group" aria-label="Font size">'
+         + '<button type="button" class="font-size-step" id="fontSmaller" title="Decrease font size" aria-label="Decrease font size">−</button>'
+         + '<button type="button" class="font-scale-label" id="fontScaleReset" title="Reset font size" aria-label="Reset font size">100%</button>'
+         + '<button type="button" class="font-size-step" id="fontLarger" title="Increase font size" aria-label="Increase font size">+</button>'
+         + '</div></div>';
+    html += '<div class="scheme-menu-title">Reading font</div>';
+    html += '<button class="scheme-item" role="menuitemradio" aria-checked="false" data-font="theme">'
+         +  '<span class="scheme-name">Theme default</span>'
+         +  SCHEME_CHECK_SVG + '</button>';
+    let group = '';
+    FONTS.forEach((f) => {
+        if (f.group !== group) {
+            group = f.group;
+            html += '<div class="scheme-menu-title">' + group + '</div>';
+        }
+        const family = f.sans.replace(/"/g, "'");
+        html += '<button class="scheme-item" role="menuitemradio" aria-checked="false"'
+             +  ' data-font="' + f.id + '">'
+             +  '<span class="scheme-name" style="font-family: ' + family + '">' + f.label + '</span>'
+             +  SCHEME_CHECK_SVG + '</button>';
+    });
+    fontMenu.innerHTML = html;
+    fontMenu.querySelectorAll('.scheme-item').forEach((el) => {
+        el.addEventListener('click', () => {
+            setFont(el.getAttribute('data-font'), true);
+            closeFontMenu();
+        });
+    });
+}
+
+function openFontMenu() {
+    closeSchemeMenu();
+    fontMenu.classList.add('open');
+    fontMenu.setAttribute('aria-hidden', 'false');
+    fontToggleBtn.setAttribute('aria-expanded', 'true');
+}
+function closeFontMenu() {
+    fontMenu.classList.remove('open');
+    fontMenu.setAttribute('aria-hidden', 'true');
+    fontToggleBtn.setAttribute('aria-expanded', 'false');
+}
+function toggleFontMenu() {
+    if (fontMenu.classList.contains('open')) closeFontMenu();
+    else openFontMenu();
+}
+
+buildFontMenu();
+(function initFont() {
+    const stored = getStoredFont();
+    setFont(fontById(stored) ? stored : 'theme', false);
+})();
+
+fontToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleFontMenu();
+});
+
+/* ───── Reading size ─────
+   Steps --font-scale on the article (prose, headings, code, tables). The
+   percent in the middle snaps back to the designed size. Remembered like the
+   font face. ───── */
+const FONT_SCALE_MIN = 0.8;
+const FONT_SCALE_MAX = 1.6;
+const FONT_SCALE_STEP = 0.1;
+const fontSmallerBtn = document.getElementById('fontSmaller');
+const fontLargerBtn = document.getElementById('fontLarger');
+const fontScaleResetBtn = document.getElementById('fontScaleReset');
+
+function clampFontScale(n) {
+    const s = Math.round(Number(n) * 10) / 10;
+    if (!isFinite(s)) return 1;
+    if (s < FONT_SCALE_MIN) return FONT_SCALE_MIN;
+    if (s > FONT_SCALE_MAX) return FONT_SCALE_MAX;
+    return s;
+}
+
+function setFontScale(scale, persist) {
+    const s = clampFontScale(scale);
+    document.documentElement.style.setProperty('--font-scale', String(s));
+    if (persist) { try { localStorage.setItem('doc-font-scale', String(s)); } catch (e) {} }
+    const pct = Math.round(s * 100) + '%';
+    fontScaleResetBtn.textContent = pct;
+    fontSmallerBtn.disabled = s <= FONT_SCALE_MIN;
+    fontLargerBtn.disabled = s >= FONT_SCALE_MAX;
+    fontSmallerBtn.title = 'Decrease font size (' + pct + ')';
+    fontLargerBtn.title = 'Increase font size (' + pct + ')';
+}
+
+function getStoredFontScale() {
+    try { return localStorage.getItem('doc-font-scale'); } catch (e) { return null; }
+}
+
+(function initFontScale() {
+    const stored = parseFloat(getStoredFontScale());
+    setFontScale(isFinite(stored) ? stored : 1, false);
+})();
+
+fontSmallerBtn.addEventListener('click', () => {
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-scale')) || 1;
+    setFontScale(cur - FONT_SCALE_STEP, true);
+});
+fontLargerBtn.addEventListener('click', () => {
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-scale')) || 1;
+    setFontScale(cur + FONT_SCALE_STEP, true);
+});
+fontScaleResetBtn.addEventListener('click', () => setFontScale(1, true));
 
 /* ───── Quick document jump: press "g", type a document number, then Enter
    (or just pause) to jump. Escape or "g" again cancels. ───── */
